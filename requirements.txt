@@ -1,9 +1,9 @@
-flask
-flask_cors
+# requirements.txt
+Flask
+Flask-Cors
 pandas
+openpyxl
 matplotlib
 seaborn
 wordcloud
-openai
-fpdf
-openpyxl
+numpy
