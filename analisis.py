@@ -98,24 +98,14 @@ def color_func_sentimiento(word, **kwargs):
     """Función para colorear la nube de palabras según el sentimiento."""
     return kwargs['color_map'].get(word.lower(), "#333333")
 
-def generar_nube_palabras_coloreada(df, col_comentarios, col_calif_desc):
-    """Genera una nube de palabras coloreada por sentimiento."""
-    word_sentiment_map = defaultdict(list)
+    # ... (código previo de la función) ...
+    wc = WordCloud(stopwords=stopwords, width=800, height=400, background_color='white', max_words=100, collocations=False).generate(texto_completo)
+    wc.recolor(color_func=lambda word, **kwargs: color_func_sentimiento(word, color_map=color_map, **kwargs))
     
-    for _, row in df.iterrows():
-        comment = str(row[col_comentarios]).lower()
-        sentiment = row[col_calif_desc]
-        if pd.notna(comment):
-            words = comment.split()
-            for word in words:
-                word_sentiment_map[word].append(sentiment)
-
-    color_map = {}
-    for word, sentiments in word_sentiment_map.items():
-        if not sentiments: continue
-        dominant_sentiment = max(set(sentiments), key=sentiments.count)
-        color_map[word] = colores_sentimiento.get(dominant_sentiment, "#333333")
-
+    # ESTA ES LA LÍNEA CORRECTA
+    img_buffer = io.BytesIO()
+    wc.to_image().save(img_buffer, format='PNG')
+    return base64.b64encode(img_buffer.getvalue()).decode('utf-8')
     # Lista de palabras a excluir (stopwords)
     stopwords = set(["de", "la", "el", "en", "y", "que", "un", "una", "los", "las", "es", "muy", "por", "con", "se", "no", "del", "al", "me", "le", "lo", "su", "mi"])
     texto_completo = " ".join(str(t) for t in df[col_comentarios] if pd.notna(t))
