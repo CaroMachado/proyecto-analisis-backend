@@ -98,7 +98,6 @@ def get_detailed_analysis(df_grupo):
     if not mejoras.empty:
         for tema, grupo in mejoras.groupby('puntos_criticos'):
             ejemplos = grupo['comentarios'].dropna().head(3).tolist()
-            # --- CAMBIO CLAVE AQUÍ ---
             oportunidades.append({"tema": str(tema), "cantidad": int(len(grupo)), "ejemplos": ejemplos})
     
     positivos = df_grupo[df_grupo['destacados'].notna() & (df_grupo['destacados'] != "Otros")]
@@ -106,12 +105,12 @@ def get_detailed_analysis(df_grupo):
     if not positivos.empty:
         for tema, grupo in positivos.groupby('destacados'):
             ejemplos = grupo['comentarios'].dropna().head(3).tolist()
-            # --- Y CAMBIO CLAVE AQUÍ ---
             destacados.append({"tema": str(tema), "cantidad": int(len(grupo)), "ejemplos": ejemplos})
     
     return {
-        "total_valoraciones": len(df_grupo),
-        "total_comentarios": df_grupo['comentarios'].notna().sum(),
+        # <-- CAMBIO CLAVE: Conversión explícita a int estándar de Python
+        "total_valoraciones": int(len(df_grupo)),
+        "total_comentarios": int(df_grupo['comentarios'].notna().sum()),
         "satisfaccion": calcular_satisfaccion(df_grupo),
         "oportunidades_mejora": sorted(oportunidades, key=lambda x: x['cantidad'], reverse=True),
         "puntos_destacados": sorted(destacados, key=lambda x: x['cantidad'], reverse=True),
@@ -152,8 +151,9 @@ def procesar_datos(archivo_excel):
     periodo = fecha_inicio if fecha_inicio == fecha_fin else f"Del {fecha_inicio} al {fecha_fin}"
 
     analisis_general = {
-        "total_valoraciones": len(df),
-        "total_comentarios": df['comentarios'].notna().sum(),
+        # <-- CAMBIO CLAVE: Conversión explícita a int estándar de Python
+        "total_valoraciones": int(len(df)),
+        "total_comentarios": int(df['comentarios'].notna().sum()),
         "satisfaccion_general": calcular_satisfaccion(df),
         "grafico_diario_b64": generar_grafico_valoraciones_diarias(df),
         "grafico_conflictos_b64": generar_grafico_horas_conflictivas(df),
