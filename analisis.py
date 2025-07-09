@@ -9,6 +9,19 @@ import seaborn as sns
 from collections import defaultdict
 import numpy as np
 
+# --- MAPEO DE COLUMNAS (CONFIGURACIÓN CENTRAL) ---
+# Si los nombres de tus columnas en el Excel cambian, solo necesitas actualizarlos aquí.
+COLUMNAS = {
+    "FECHA": "fecha",
+    "HORA": "hora",
+    "SALA": "sala",
+    "SECTOR": "sector",
+    "COMENTARIOS": "Comentarios",
+    "CALIFICACION_DESC": "calificacion_descripcion", # <--- CORREGIDO AQUÍ
+    "PUNTOS_CRITICOS": "puntos_criticos",
+    "DESTACADOS": "destacados"
+}
+
 # --- CONFIGURACIÓN DE ESTILO Y COLORES ---
 colores_sentimiento = {
     "Muy Positiva": "#2ca02c",
@@ -18,17 +31,13 @@ colores_sentimiento = {
 }
 plt.style.use('seaborn-v0_8-whitegrid')
 
-# --- FUNCIONES AUXILIARES DE CÁLCULO ---
 
 def calcular_satisfaccion_desde_df(df_source):
-    """
-    <-- CAMBIO CLAVE: Calcula el índice de satisfacción general o por sector 
-    directamente desde un DataFrame, contando las calificaciones.
-    """
     if df_source.empty:
         return 0.0
 
-    counts = df_source['calificacion_descripcion'].value_counts()
+    # Usa el mapeo de columnas
+    counts = df_source[COLUMNAS["CALIFICACION_DESC"]].value_counts()
     total = len(df_source)
     
     muy_pos = counts.get("Muy Positiva", 0)
@@ -36,7 +45,6 @@ def calcular_satisfaccion_desde_df(df_source):
     neg = counts.get("Negativa", 0)
     muy_neg = counts.get("Muy Negativa", 0)
     
-    # Fórmula de Satisfacción: (% Positivas + % Muy Positivas) - (% Negativas + % Muy Negativas)
     if total == 0:
         return 0.0
         
@@ -50,15 +58,13 @@ def fig_to_base64(fig):
     plt.close(fig)
     return base64.b64encode(buf.getvalue()).decode('utf-8')
 
-# --- El resto de funciones (gráficos, nube de palabras) se mantienen igual ---
-# ... (generar_grafico_valoraciones_diarias, generar_grafico_horas_conflictivas, etc. de mi respuesta anterior) ...
+
 def generar_grafico_valoraciones_diarias(df):
-    """Genera un gráfico de barras apiladas con las valoraciones por día y una línea de satisfacción."""
     df_chart = df.copy()
-    # Asegúrate de que la columna 'fecha' se convierta a datetime correctamente
-    df_chart['fecha'] = pd.to_datetime(df_chart['fecha'], dayfirst=True)
+    df_chart[COLUMNAS["FECHA"]] = pd.to_datetime(df_chart[COLUMNAS["FECHA"]], dayfirst=True)
     
-    daily_counts = df_chart.groupby(df_chart['fecha'].dt.date)['calificacion_desc'].value_counts().unstack(fill_value=0)
+    # Usa el mapeo de columnas
+    daily_counts = df_chart.groupby(df_chart[COLUMNAS["FECHA"]].dt.date)[COLUMNAS["CALIFICACION_DESC"]].value_counts().unstack(fill_value=0)
     
     for col in colores_sentimiento.keys():
         if col not in daily_counts.columns:
@@ -66,11 +72,9 @@ def generar_grafico_valoraciones_diarias(df):
             
     daily_counts = daily_counts[list(colores_sentimiento.keys())]
 
-    # <-- CAMBIO CLAVE: Usa la nueva función de cálculo
-    daily_satisfaction = df_chart.groupby(df_chart['fecha'].dt.date).apply(calcular_satisfaccion_desde_df)
+    daily_satisfaction = df_chart.groupby(df_chart[COLUMNAS["FECHA"]].dt.date).apply(calcular_satisfaccion_desde_df)
 
     fig, ax1 = plt.subplots(figsize=(12, 7))
-    
     daily_counts.plot(kind='bar', stacked=True, color=[colores_sentimiento[col] for col in daily_counts.columns], ax=ax1, width=0.6)
     
     ax1.set_title('Valoraciones y Satisfacción por Día', fontsize=16)
@@ -79,7 +83,6 @@ def generar_grafico_valoraciones_diarias(df):
     ax1.tick_params(axis='x', rotation=45)
     ax1.legend(title='Calificación')
     ax1.xaxis.set_major_formatter(mdates.DateFormatter('%d-%m-%Y'))
-
 
     ax2 = ax1.twinx()
     ax2.plot(ax1.get_xticks(), daily_satisfaction.values, marker='o', color='purple', linestyle='--', label='Satisfacción (%)')
@@ -92,12 +95,12 @@ def generar_grafico_valoraciones_diarias(df):
 
 
 def generar_grafico_horas_conflictivas(df):
-    """Genera un gráfico de barras de horas con más comentarios negativos por sector."""
-    df_neg = df[df['calificacion_desc'].isin(['Negativa', 'Muy Negativa'])].copy()
+    # Usa el mapeo de columnas
+    df_neg = df[df[COLUMNAS["CALIFICACION_DESC"]].isin(['Negativa', 'Muy Negativa'])].copy()
     if df_neg.empty:
         return None
         
-    df_neg['hora_int'] = pd.to_datetime(df_neg['hora'], format='%H:%M:%S', errors='coerce').dt.hour
+    df_neg['hora_int'] = pd.to_datetime(df_neg[COLUMNAS["HORA"]], format='%H:%M:%S', errors='coerce').dt.hour
     
     conflictos = df_neg.groupby(['hora_int', 'sector_final']).size().unstack(fill_value=0)
     
@@ -113,18 +116,18 @@ def generar_grafico_horas_conflictivas(df):
     
     return fig_to_base64(fig)
 
-def color_func_sentimiento(word, font_size, position, orientation, random_state=None, **kwargs):
-    """Función de color para la nube de palabras. Colorea cada palabra según su sentimiento asociado."""
-    color = kwargs['color_map'].get(word.lower(), "#333333") # Default a gris oscuro
+
+def color_func_sentimiento(word, **kwargs):
+    color = kwargs['color_map'].get(word.lower(), "#333333")
     return color
 
 def generar_nube_palabras_coloreada(df):
-    """Genera una nube de palabras donde el color de cada palabra se basa en el sentimiento de los comentarios donde aparece."""
     word_sentiment_map = defaultdict(list)
     
     for _, row in df.iterrows():
-        comment = str(row['Comentarios']).lower()
-        sentiment = row['calificacion_desc']
+        # Usa el mapeo de columnas
+        comment = str(row[COLUMNAS["COMENTARIOS"]]).lower()
+        sentiment = row[COLUMNAS["CALIFICACION_DESC"]]
         if pd.notna(comment):
             words = comment.split()
             for word in words:
@@ -136,7 +139,7 @@ def generar_nube_palabras_coloreada(df):
         dominant_sentiment = max(set(sentiments), key=sentiments.count)
         color_map[word] = colores_sentimiento.get(dominant_sentiment, "#333333")
 
-    texto_completo = " ".join(str(t) for t in df['Comentarios'] if pd.notna(t))
+    texto_completo = " ".join(str(t) for t in df[COLUMNAS["COMENTARIOS"]] if pd.notna(t))
     if not texto_completo.strip():
         return None
         
@@ -148,71 +151,63 @@ def generar_nube_palabras_coloreada(df):
     img = io.BytesIO()
     wc.to_image().save(img, format='PNG')
     return base64.b64encode(img.getvalue()).decode()
-    
-# --- FUNCIÓN PRINCIPAL DE PROCESAMIENTO ---
 
 def procesar_datos(archivo_excel):
     try:
-        # <-- CAMBIO CLAVE: Ahora solo lee la primera hoja. No más 'Resumen'.
-        df_main = pd.read_excel(archivo_excel, sheet_name=0) 
+        df_main = pd.read_excel(archivo_excel, sheet_name=0)
     except Exception as e:
-        raise ValueError(f"Error al leer el archivo Excel. Asegúrate de que tenga el formato correcto. Error: {e}")
+        # Añadir un control para verificar las columnas al cargar el archivo
+        columnas_esperadas = set(COLUMNAS.values())
+        if not columnas_esperadas.issubset(df_main.columns):
+            columnas_faltantes = columnas_esperadas - set(df_main.columns)
+            raise ValueError(f"Faltan columnas esenciales en el archivo Excel: {', '.join(columnas_faltantes)}")
+        raise ValueError(f"Error al leer el archivo Excel. Error: {e}")
 
-    # --- LIMPIEZA Y PREPARACIÓN DE DATOS ---
     df = df_main.copy()
-    df['fecha'] = pd.to_datetime(df['fecha'], dayfirst=True).dt.date
+    df[COLUMNAS["FECHA"]] = pd.to_datetime(df[COLUMNAS["FECHA"]], dayfirst=True).dt.date
+    df['sector_final'] = df.apply(lambda row: 'VIP' if 'VIP' in str(row[COLUMNAS["SALA"]]) else str(row[COLUMNAS["SECTOR"]]).strip(), axis=1)
     
-    df['sector_final'] = df.apply(lambda row: 'VIP' if 'VIP' in str(row['sala']) else str(row['sector']).strip(), axis=1)
-    
-    # --- ANÁLISIS GENERAL ---
-    fecha_inicio = df['fecha'].min().strftime('%d/%m/%Y')
-    fecha_fin = df['fecha'].max().strftime('%d/%m/%Y')
+    fecha_inicio = df[COLUMNAS["FECHA"]].min().strftime('%d/%m/%Y')
+    fecha_fin = df[COLUMNAS["FECHA"]].max().strftime('%d/%m/%Y')
     periodo = fecha_inicio if fecha_inicio == fecha_fin else f"Del {fecha_inicio} al {fecha_fin}"
 
     total_valoraciones = len(df)
-    total_comentarios = df['Comentarios'].notna().sum()
-    
-    # <-- CAMBIO CLAVE: Calcular satisfacción general desde el DF principal
+    total_comentarios = df[COLUMNAS["COMENTARIOS"]].notna().sum()
     satisfaccion_general = calcular_satisfaccion_desde_df(df)
 
-    # --- ANÁLISIS POR SECTOR ---
     sectores = df['sector_final'].unique()
     analisis_sectores = {}
 
     for sector in sectores:
         df_sector = df[df['sector_final'] == sector]
         
-        # Oportunidades de mejora
-        mejoras = df_sector[df_sector['puntos_criticos'].notna() & (df_sector['puntos_criticos'] != "Otros")]
+        # Usa el mapeo de columnas
+        mejoras = df_sector[df_sector[COLUMNAS["PUNTOS_CRITICOS"]].notna() & (df_sector[COLUMNAS["PUNTOS_CRITICOS"]] != "Otros")]
         oportunidades = []
         if not mejoras.empty:
-            for tema, grupo in mejoras.groupby('puntos_criticos'):
-                ejemplos = grupo['Comentarios'].dropna().head(3).tolist()
+            for tema, grupo in mejoras.groupby(COLUMNAS["PUNTOS_CRITICOS"]):
+                ejemplos = grupo[COLUMNAS["COMENTARIOS"]].dropna().head(3).tolist()
                 oportunidades.append({"tema": tema, "cantidad": len(grupo), "ejemplos": ejemplos})
 
-        # Puntos destacados
-        positivos = df_sector[df_sector['destacados'].notna() & (df_sector['destacados'] != "Otros")]
+        positivos = df_sector[df_sector[COLUMNAS["DESTACADOS"]].notna() & (df_sector[COLUMNAS["DESTACADOS"]] != "Otros")]
         destacados = []
         if not positivos.empty:
-            for tema, grupo in positivos.groupby('destacados'):
-                ejemplos = grupo['Comentarios'].dropna().head(3).tolist()
+            for tema, grupo in positivos.groupby(COLUMNAS["DESTACADOS"]):
+                ejemplos = grupo[COLUMNAS["COMENTARIOS"]].dropna().head(3).tolist()
                 destacados.append({"tema": tema, "cantidad": len(grupo), "ejemplos": ejemplos})
         
         analisis_sectores[sector] = {
             "total_valoraciones": len(df_sector),
-            "total_comentarios": df_sector['Comentarios'].notna().sum(),
-            # <-- CAMBIO CLAVE: Usa la nueva función para cada sector
+            "total_comentarios": df_sector[COLUMNAS["COMENTARIOS"]].notna().sum(),
             "satisfaccion": calcular_satisfaccion_desde_df(df_sector),
             "oportunidades_mejora": sorted(oportunidades, key=lambda x: x['cantidad'], reverse=True),
             "puntos_destacados": sorted(destacados, key=lambda x: x['cantidad'], reverse=True),
         }
     
-    # --- GENERACIÓN DE VISUALES ---
     grafico_diario = generar_grafico_valoraciones_diarias(df)
     grafico_conflictos = generar_grafico_horas_conflictivas(df)
     nube_palabras = generar_nube_palabras_coloreada(df)
 
-    # --- COMPILACIÓN DE RESULTADOS ---
     resultados = {
         "informe_periodo": periodo,
         "analisis_general": {
