@@ -18,11 +18,9 @@ plt.style.use('seaborn-v0_8-whitegrid')
 
 # ==============================================================================
 # SECCIÓN 1: FUNCIONES DE AYUDA (Helpers)
-# Todas las funciones que realizan tareas específicas se definen aquí primero.
 # ==============================================================================
 
 def calcular_satisfaccion(df_source):
-    """Calcula el índice de satisfacción para cualquier DataFrame dado."""
     if df_source.empty: return 0.0
     counts = df_source['calificacion_descripcion'].value_counts()
     total = len(df_source)
@@ -33,14 +31,12 @@ def calcular_satisfaccion(df_source):
     return round(satisfaccion * 100, 2)
 
 def fig_to_base64(fig):
-    """Convierte una figura de Matplotlib a una cadena base64."""
     buf = io.BytesIO()
     fig.savefig(buf, format='png', bbox_inches='tight')
     plt.close(fig)
     return base64.b64encode(buf.getvalue()).decode('utf-8')
 
 def generar_grafico_valoraciones_diarias(df):
-    """Genera un gráfico de barras apiladas con las valoraciones por día."""
     df_chart = df.copy()
     df_chart['fecha'] = pd.to_datetime(df_chart['fecha'], dayfirst=True)
     daily_counts = df_chart.groupby(df_chart['fecha'].dt.date)['calificacion_descripcion'].value_counts().unstack(fill_value=0)
@@ -59,7 +55,6 @@ def generar_grafico_valoraciones_diarias(df):
     return fig_to_base64(fig)
 
 def generar_grafico_horas_conflictivas(df):
-    """Genera un gráfico de barras de horas conflictivas."""
     df_neg = df[df['calificacion_descripcion'].isin(['Negativa', 'Muy Negativa'])].copy()
     if df_neg.empty: return None
     df_neg['hora_int'] = pd.to_datetime(df_neg['hora'], format='%H:%M:%S', errors='coerce').dt.hour
@@ -72,10 +67,8 @@ def generar_grafico_horas_conflictivas(df):
     return fig_to_base64(fig)
 
 def generar_nube_palabras_coloreada(df):
-    """Genera una nube de palabras donde el color se basa en el sentimiento."""
     def color_func_sentimiento(word, **kwargs):
         return kwargs['color_map'].get(word.lower(), "#333333")
-
     word_sentiment_map = defaultdict(list)
     for _, row in df.iterrows():
         comment = str(row['comentarios']).lower()
@@ -83,26 +76,21 @@ def generar_nube_palabras_coloreada(df):
         if pd.notna(comment) and sentiment is not None:
             for word in comment.split():
                 word_sentiment_map[word].append(sentiment)
-
     color_map = {}
     for word, sentiments in word_sentiment_map.items():
         if not sentiments: continue
         dominant_sentiment = max(set(sentiments), key=sentiments.count)
         color_map[word] = colores_sentimiento.get(dominant_sentiment, "#333333")
-
     stopwords = set(["de", "la", "el", "en", "y", "que", "un", "una", "los", "las", "es", "muy", "por", "con", "se", "no", "del", "al", "me", "le", "lo", "su", "mi"])
     texto_completo = " ".join(str(t) for t in df['comentarios'] if pd.notna(t))
     if not texto_completo.strip(): return None
-
     wc = WordCloud(stopwords=stopwords, width=800, height=400, background_color='white', max_words=100, collocations=False).generate(texto_completo)
     wc.recolor(color_func=lambda word, **kwargs: color_func_sentimiento(word, color_map=color_map, **kwargs))
-    
     img_buffer = io.BytesIO()
     wc.to_image().save(img_buffer, format='PNG')
     return base64.b64encode(img_buffer.getvalue()).decode('utf-8')
 
 def get_detailed_analysis(df_grupo):
-    """Función reutilizable para analizar un grupo (sector o ubicación)."""
     if df_grupo.empty: return None
     
     mejoras = df_grupo[df_grupo['puntos_criticos'].notna() & (df_grupo['puntos_criticos'] != "Otros")]
@@ -110,14 +98,16 @@ def get_detailed_analysis(df_grupo):
     if not mejoras.empty:
         for tema, grupo in mejoras.groupby('puntos_criticos'):
             ejemplos = grupo['comentarios'].dropna().head(3).tolist()
-            oportunidades.append({"tema": str(tema), "cantidad": len(grupo), "ejemplos": ejemplos})
+            # --- CAMBIO CLAVE AQUÍ ---
+            oportunidades.append({"tema": str(tema), "cantidad": int(len(grupo)), "ejemplos": ejemplos})
     
     positivos = df_grupo[df_grupo['destacados'].notna() & (df_grupo['destacados'] != "Otros")]
     destacados = []
     if not positivos.empty:
         for tema, grupo in positivos.groupby('destacados'):
             ejemplos = grupo['comentarios'].dropna().head(3).tolist()
-            destacados.append({"tema": str(tema), "cantidad": len(grupo), "ejemplos": ejemplos})
+            # --- Y CAMBIO CLAVE AQUÍ ---
+            destacados.append({"tema": str(tema), "cantidad": int(len(grupo)), "ejemplos": ejemplos})
     
     return {
         "total_valoraciones": len(df_grupo),
@@ -129,7 +119,6 @@ def get_detailed_analysis(df_grupo):
 
 # ==============================================================================
 # SECCIÓN 2: FUNCIÓN PRINCIPAL ORQUESTADORA
-# Esta es la única función que se llama desde app.py. Llama a todas las anteriores.
 # ==============================================================================
 
 def procesar_datos(archivo_excel):
@@ -138,11 +127,9 @@ def procesar_datos(archivo_excel):
     except Exception as e:
         raise ValueError(f"No se pudo leer el archivo Excel. Asegúrate de que es un archivo .xlsx válido. Error: {e}")
 
-    # PASO 1: Limpieza robusta de nombres de columnas
     original_cols = df.columns.tolist()
     df.columns = [re.sub(r'\s+', '_', col.strip()).lower() for col in df.columns]
 
-    # PASO 2: Verificación de que todas las columnas necesarias existen
     columnas_necesarias = [
         'fecha', 'hora', 'sala', 'sector', 'ubicacion',
         'comentarios', 'calificacion', 'calificacion_descripcion',
@@ -157,11 +144,9 @@ def procesar_datos(archivo_excel):
             f"Columnas originales en el Excel: {', '.join(original_cols)}"
         )
 
-    # PASO 3: Preparación de datos
     df['fecha'] = pd.to_datetime(df['fecha'], errors='coerce')
     df['sector_final'] = df.apply(lambda row: 'VIP' if 'VIP' in str(row['sala']) else str(row['sector']).strip(), axis=1)
 
-    # PASO 4: ANÁLISIS GENERAL
     fecha_inicio = df['fecha'].min().strftime('%d/%m/%Y')
     fecha_fin = df['fecha'].max().strftime('%d/%m/%Y')
     periodo = fecha_inicio if fecha_inicio == fecha_fin else f"Del {fecha_inicio} al {fecha_fin}"
@@ -175,14 +160,12 @@ def procesar_datos(archivo_excel):
         "nube_palabras_b64": generar_nube_palabras_coloreada(df)
     }
     
-    # PASO 5: ANÁLISIS DETALLADO
     analisis_sectores = {s: get_detailed_analysis(df[df['sector_final'] == s]) for s in df['sector_final'].unique()}
     
     analisis_ubicaciones = {}
     for u in df['ubicacion'].dropna().unique():
         analisis_ubicaciones[u] = get_detailed_analysis(df[df['ubicacion'] == u])
     
-    # PASO 6: Compilación del resultado final
     return {
         "informe_periodo": periodo,
         "analisis_general": analisis_general,
