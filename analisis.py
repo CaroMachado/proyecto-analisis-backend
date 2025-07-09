@@ -133,7 +133,7 @@ def generar_nube_palabras_coloreada(df):
         if not sentiments: continue
         dominant_sentiment = max(set(sentiments), key=sentiments.count)
         color_map[word] = colores_sentimiento.get(dominant_sentiment, "#333333")
-    stopwords = set(["de", "la", "el", "en", "y", "que", "un", "una", "los", "las", "es", "muy", "por", "con", "se", "no", "del", "al", "me", "le", "lo", "su", "mi"])
+    stopwords = set(["de", "la", "el", "en", "y", "que", "un", "una", "los", "las", "es", "muy", "por", "con", "se", "no", "del", "al", "me", "le", "lo", "su", "mi","todas","j","b","mi","hay","tiene","riber","quiero","más","g"])
     texto_completo = " ".join(str(t) for t in df['comentarios'] if pd.notna(t))
     if not texto_completo.strip(): return None
     wc = WordCloud(stopwords=stopwords, width=800, height=400, background_color='white', max_words=100, collocations=False).generate(texto_completo)
@@ -210,7 +210,7 @@ def procesar_datos(archivo_excel):
         if 'atención al cliente' in sector_lower: return 'Atención al Cliente'
         if 'caja' in sector_lower: return 'Cajas'
         if 'baño' in sector_lower: return 'Baños'
-        if 'restoran' in sector_lower: return 'Restoranes'
+        if 'restaurantes' in sector_lower: return 'Restaurantes'
         if 'autoservicio' in sector_lower: return 'Autoservicios'
         if 'traslados' in sector_lower: return 'Traslados'
         if 'vip' in sector_lower: return 'Sectores VIP'
@@ -234,7 +234,7 @@ def procesar_datos(archivo_excel):
     # --- CAMBIO CLAVE: Análisis por Grupos con sub-detalles ---
     analisis_grupos = {}
     # Orden de aparición de los grupos
-    orden_grupos = ['Atención al Cliente', 'Cajas', 'Baños', 'Restoranes', 'Autoservicios', 'Traslados', 'Sectores VIP', 'Otros']
+    orden_grupos = ['Atención al Cliente', 'Cajas', 'Baños', 'Restaurantes', 'Autoservicios', 'Traslados', 'Sectores VIP']
     
     for grupo_nombre in orden_grupos:
         df_grupo = df[df['grupo_sector'] == grupo_nombre]
