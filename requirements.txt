@@ -1,0 +1,9 @@
+flask
+flask_cors
+pandas
+matplotlib
+seaborn
+wordcloud
+openai
+fpdf
+openpyxl
