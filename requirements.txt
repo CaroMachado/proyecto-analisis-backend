@@ -8,5 +8,8 @@ wordcloud
 numpy
 fpdf2
 transformers
-# Especificamos una versión de PyTorch solo para CPU, más ligera para Render
 torch --extra-index-url https://download.pytorch.org/whl/cpu
+sentencepiece
+# Librerías para tareas en segundo plano
+celery
+redis
