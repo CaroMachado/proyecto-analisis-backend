@@ -1,12 +1,12 @@
 Flask
 Flask-Cors
+gunicorn
 pandas
 openpyxl
 matplotlib
 seaborn
 wordcloud
-numpy
 fpdf2
 transformers
-torch --extra-index-url https://download.pytorch.org/whl/cpu
 sentencepiece
+torch --extra-index-url https://download.pytorch.org/whl/cpu
