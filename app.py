@@ -1,10 +1,8 @@
-# app.py
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
-import pandas as pd
 import os
 from analisis import procesar_datos
-# from generar_pdf_mejorado import crear_pdf_completo # Importaríamos el nuevo generador de PDF
+from generar_pdf import crear_pdf_completo
 
 app = Flask(__name__)
 CORS(app)
@@ -19,14 +17,12 @@ def subir_archivo():
         return jsonify({'error': 'No se seleccionó ningún archivo.'}), 400
 
     try:
-        # La función procesar_datos ahora recibe el objeto de archivo directamente
         resultados = procesar_datos(archivo)
         return jsonify(resultados)
     except Exception as e:
-        # Devolver un error más informativo al frontend
+        app.logger.error(f"Error al procesar el archivo: {e}", exc_info=True)
         return jsonify({'error': f'Error al procesar el archivo: {str(e)}'}), 500
 
-# Endpoint para PDF (requiere un generador de PDF avanzado como se describe)
 @app.route('/descargar_pdf', methods=['POST'])
 def descargar_pdf():
     try:
@@ -34,17 +30,18 @@ def descargar_pdf():
         if not data:
             return jsonify({'error': 'No se recibieron datos para generar el PDF.'}), 400
             
-        # Esta función tendría que ser reescrita para manejar la nueva estructura de datos
-        # pdf_path = crear_pdf_completo(data) # Esta función no está implementada aquí
+        pdf_buffer = crear_pdf_completo(data)
         
-        # De momento, devolvemos un error indicando que no está lista
-        return jsonify({'error': 'La generación de PDF avanzado aún no está implementada.'}), 501
-        
-        # return send_file(pdf_path, as_attachment=True)
+        return send_file(
+            pdf_buffer,
+            as_attachment=True,
+            download_name='informe_satisfaccion_clientes.pdf',
+            mimetype='application/pdf'
+        )
     except Exception as e:
+        app.logger.error(f"Error al generar el PDF: {e}", exc_info=True)
         return jsonify({'error': f'Error al generar el PDF: {str(e)}'}), 500
 
 if __name__ == '__main__':
-    # Usar el puerto que Render asigna, con un default para desarrollo local
     port = int(os.environ.get('PORT', 5000))
     app.run(debug=True, host='0.0.0.0', port=port)
