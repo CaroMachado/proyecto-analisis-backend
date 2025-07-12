@@ -27,7 +27,7 @@ sentiment_pipeline = None
 try:
     sentiment_pipeline = pipeline(
         "sentiment-analysis",
-        model="pysentimiento/robertuito-sentiment-analysis",
+        model="mrm8488/bert-tiny-finetuned-sst2-spanish", # <-- NUEVO MODELO LIGERO
         device=-1
     )
     print("INFO: Modelo de análisis de sentimiento cargado exitosamente.")
