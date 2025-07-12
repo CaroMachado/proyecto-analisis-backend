@@ -15,34 +15,38 @@ from generar_pdf import crear_pdf_completo
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 app = Flask(__name__)
 
-# Configura CORS para permitir solicitudes desde tu frontend.
-# Para Render, es mejor ser explícito. Para desarrollo local, puedes añadir tu IP.
+# Configura CORS. La lista de orígenes ya es correcta.
 CORS(app, resources={r"/*": {"origins": ["https://devwebcm.com", "http://127.0.0.1:5500", "http://localhost:5500"]}})
 
 # --- Almacenamiento en memoria para las tareas ---
-# Suficiente para un solo worker, como en Render Free/Hobby.
 TAREAS = {}
+
+# --- NUEVA RUTA DE HEALTH CHECK ---
+@app.route('/')
+def health_check():
+    """
+    Ruta simple para verificar que la aplicación está viva.
+    Si el modelo está cargado, lo indica.
+    """
+    from analisis import MODELO_CARGADO
+    status = "OK"
+    if MODELO_CARGADO:
+        status += " - Modelo de IA cargado."
+    else:
+        status += " - Modelo de IA NO cargado."
+    return jsonify({"status": status})
 
 # --- Función que se ejecuta en el hilo secundario ---
 def procesar_en_segundo_plano(task_id, temp_file_path):
-    """
-    Función que realiza el trabajo pesado sin bloquear el servidor.
-    """
     app.logger.info(f"Iniciando análisis para la tarea {task_id}.")
     try:
-        # 1. Ejecutar el análisis de datos
         resultados = procesar_datos(temp_file_path)
-        
-        # 2. Guardar el resultado final en el diccionario de tareas
         TAREAS[task_id] = {'state': 'SUCCESS', 'data': resultados}
         app.logger.info(f"Análisis para la tarea {task_id} completado con éxito.")
-
     except Exception as e:
         app.logger.error(f"Error en el hilo de análisis para la tarea {task_id}: {e}", exc_info=True)
-        # Guardar el error para que el frontend pueda verlo
         TAREAS[task_id] = {'state': 'FAILURE', 'status': f"Ocurrió un error durante el procesamiento: {str(e)}"}
     finally:
-        # 3. Limpiar el archivo temporal
         try:
             if os.path.exists(temp_file_path):
                 os.remove(temp_file_path)
@@ -54,7 +58,6 @@ def procesar_en_segundo_plano(task_id, temp_file_path):
 
 @app.route('/subir', methods=['POST'])
 def subir_archivo():
-    """Recibe el archivo y comienza la tarea en segundo plano."""
     if 'archivo' not in request.files:
         return jsonify({'error': 'No se envió ningún archivo.'}), 400
     
@@ -62,7 +65,6 @@ def subir_archivo():
     if file.filename == '':
         return jsonify({'error': 'No se seleccionó ningún archivo.'}), 400
 
-    # Guardar archivo en una ubicación temporal segura
     fd, temp_path = tempfile.mkstemp(suffix='.xlsx')
     os.close(fd)
     file.save(temp_path)
@@ -71,17 +73,14 @@ def subir_archivo():
     task_id = str(uuid.uuid4())
     TAREAS[task_id] = {'state': 'PENDING', 'status': 'El análisis ha comenzado. Esto puede tardar varios minutos...'}
 
-    # Iniciar el hilo de trabajo
     thread = Thread(target=procesar_en_segundo_plano, args=(task_id, temp_path))
     thread.daemon = True
     thread.start()
     
-    # Responder inmediatamente con el ID de la tarea
     return jsonify({'task_id': task_id}), 202
 
 @app.route('/status/<task_id>', methods=['GET'])
 def get_status(task_id):
-    """El frontend llama aquí para preguntar por el estado de la tarea."""
     task_info = TAREAS.get(task_id)
     if not task_info:
         return jsonify({'state': 'NOT_FOUND', 'status': 'Tarea no encontrada. Por favor, intente de nuevo.'}), 404
@@ -89,24 +88,20 @@ def get_status(task_id):
 
 @app.route('/descargar_pdf', methods=['POST'])
 def descargar_pdf():
-    """Genera y envía el archivo PDF."""
     try:
         data = request.get_json()
         if not data:
             return jsonify({'error': 'No se recibieron datos para generar el PDF.'}), 400
         
-        # Guardamos el ID de la tarea para poder limpiarla después
         task_id = data.get('task_id')
-
         pdf_buffer = crear_pdf_completo(data)
         
-        # Opcional: Limpiar la tarea de la memoria después de la descarga
         if task_id and task_id in TAREAS:
             try:
                 del TAREAS[task_id]
                 app.logger.info(f"Tarea {task_id} eliminada de la memoria.")
             except KeyError:
-                pass # La tarea ya pudo haber sido eliminada
+                pass
 
         return send_file(
             pdf_buffer,
@@ -119,6 +114,5 @@ def descargar_pdf():
         return jsonify({'error': f'Error interno al generar el PDF: {str(e)}'}), 500
 
 if __name__ == '__main__':
-    # El puerto lo gestiona Render, pero es útil para pruebas locales
-    port = int(os.environ.get('PORT', 5001)) # Usar 5001 para evitar conflictos
+    port = int(os.environ.get('PORT', 5001))
     app.run(host='0.0.0.0', port=port, debug=False)
