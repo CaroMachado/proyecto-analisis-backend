@@ -1,5 +1,4 @@
 # app.py
-
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 import os
@@ -16,14 +15,12 @@ from generar_pdf import crear_pdf_completo
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 app = Flask(__name__)
 
-# Configura CORS para permitir solicitudes desde tu dominio de frontend.
-# Si estás probando localmente, puedes usar "*" temporalmente, pero es menos seguro.
-CORS(app, resources={r"/*": {"origins": ["https://devwebcm.com", "http://127.0.0.1:5500"]}})
-
+# Configura CORS para permitir solicitudes desde tu frontend.
+# Para Render, es mejor ser explícito. Para desarrollo local, puedes añadir tu IP.
+CORS(app, resources={r"/*": {"origins": ["https://devwebcm.com", "http://127.0.0.1:5500", "http://localhost:5500"]}})
 
 # --- Almacenamiento en memoria para las tareas ---
-# En una aplicación real más grande, usarías Redis o una base de datos.
-# Para este caso, un diccionario es suficiente.
+# Suficiente para un solo worker, como en Render Free/Hobby.
 TAREAS = {}
 
 # --- Función que se ejecuta en el hilo secundario ---
@@ -45,7 +42,7 @@ def procesar_en_segundo_plano(task_id, temp_file_path):
         # Guardar el error para que el frontend pueda verlo
         TAREAS[task_id] = {'state': 'FAILURE', 'status': f"Ocurrió un error durante el procesamiento: {str(e)}"}
     finally:
-        # 3. Limpiar el archivo temporal, sin importar si hubo éxito o error
+        # 3. Limpiar el archivo temporal
         try:
             if os.path.exists(temp_file_path):
                 os.remove(temp_file_path)
@@ -57,9 +54,7 @@ def procesar_en_segundo_plano(task_id, temp_file_path):
 
 @app.route('/subir', methods=['POST'])
 def subir_archivo():
-    """
-    Ruta para iniciar el proceso. Recibe el archivo y comienza la tarea en segundo plano.
-    """
+    """Recibe el archivo y comienza la tarea en segundo plano."""
     if 'archivo' not in request.files:
         return jsonify({'error': 'No se envió ningún archivo.'}), 400
     
@@ -67,56 +62,51 @@ def subir_archivo():
     if file.filename == '':
         return jsonify({'error': 'No se seleccionó ningún archivo.'}), 400
 
-    # Guardar el archivo en una ubicación temporal segura
-    # mkstemp devuelve un descriptor de archivo y una ruta. Cerramos el descriptor y usamos la ruta.
+    # Guardar archivo en una ubicación temporal segura
     fd, temp_path = tempfile.mkstemp(suffix='.xlsx')
     os.close(fd)
     file.save(temp_path)
     app.logger.info(f"Archivo recibido y guardado temporalmente en: {temp_path}")
 
-    # Crear un ID único para esta tarea
     task_id = str(uuid.uuid4())
-    
-    # Marcar la tarea como "pendiente"
     TAREAS[task_id] = {'state': 'PENDING', 'status': 'El análisis ha comenzado. Esto puede tardar varios minutos...'}
 
-    # Iniciar el hilo de trabajo en segundo plano
+    # Iniciar el hilo de trabajo
     thread = Thread(target=procesar_en_segundo_plano, args=(task_id, temp_path))
-    thread.daemon = True  # Permite que la app principal se cierre aunque el hilo no haya terminado
+    thread.daemon = True
     thread.start()
     
-    # Responder inmediatamente al frontend con el ID de la tarea
-    return jsonify({'task_id': task_id}), 202 # 202 Accepted indica que la solicitud fue aceptada para procesar
+    # Responder inmediatamente con el ID de la tarea
+    return jsonify({'task_id': task_id}), 202
 
 @app.route('/status/<task_id>', methods=['GET'])
 def get_status(task_id):
-    """
-    El frontend llama a esta ruta periódicamente para preguntar por el estado de la tarea.
-    """
+    """El frontend llama aquí para preguntar por el estado de la tarea."""
     task_info = TAREAS.get(task_id)
-    
     if not task_info:
         return jsonify({'state': 'NOT_FOUND', 'status': 'Tarea no encontrada. Por favor, intente de nuevo.'}), 404
-        
     return jsonify(task_info)
 
 @app.route('/descargar_pdf', methods=['POST'])
 def descargar_pdf():
-    """
-    Genera y envía el archivo PDF. Esto es rápido, por lo que puede ser síncrono.
-    """
+    """Genera y envía el archivo PDF."""
     try:
         data = request.get_json()
         if not data:
             return jsonify({'error': 'No se recibieron datos para generar el PDF.'}), 400
         
+        # Guardamos el ID de la tarea para poder limpiarla después
+        task_id = data.get('task_id')
+
         pdf_buffer = crear_pdf_completo(data)
         
-        # Eliminar los datos de la tarea de la memoria una vez descargado el PDF para liberar espacio
-        # Esto es opcional, pero es una buena práctica
-        # task_id = data.get('task_id') # Necesitarías añadir task_id a los datos del PDF
-        # if task_id and task_id in TAREAS:
-        #     del TAREAS[task_id]
+        # Opcional: Limpiar la tarea de la memoria después de la descarga
+        if task_id and task_id in TAREAS:
+            try:
+                del TAREAS[task_id]
+                app.logger.info(f"Tarea {task_id} eliminada de la memoria.")
+            except KeyError:
+                pass # La tarea ya pudo haber sido eliminada
 
         return send_file(
             pdf_buffer,
@@ -130,5 +120,5 @@ def descargar_pdf():
 
 if __name__ == '__main__':
     # El puerto lo gestiona Render, pero es útil para pruebas locales
-    port = int(os.environ.get('PORT', 5000))
+    port = int(os.environ.get('PORT', 5001)) # Usar 5001 para evitar conflictos
     app.run(host='0.0.0.0', port=port, debug=False)
