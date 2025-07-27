@@ -1,4 +1,4 @@
-// server.js - VERSIÓN FINAL CON CORRECCIÓN DE HORA Y ANÁLISIS MEJORADO
+// server.js - VERSIÓN FINAL, ROBUSTA Y COMPLETA
 const express = require('express');
 const multer = require('multer');
 const ExcelJS = require('exceljs');
@@ -8,13 +8,38 @@ const app = express();
 app.use(cors());
 const PORT = process.env.PORT || 3000;
 
-// Constantes y funciones auxiliares
 const STOPWORDS = ['de','la','que','el','en','y','a','los','del','se','las','por','un','para','con','no','una','su','al','lo','como','más','pero','sus','le','ya','o','este','ha','me','si','sin','sobre','este','muy','cuando','también','hasta','hay','donde','quien','desde','todo','nos','durante','uno','ni','contra','ese','eso','mi','qué','e','son','fue','muy','gracias','hola','buen','dia','punto','puntos'];
 function getWordsFromString(text) { if (!text || typeof text !== 'string') return []; return text.toLowerCase().match(/\b(\w+)\b/g)?.filter(word => !STOPWORDS.includes(word) && word.length > 3) || []; }
 const calculateSatisfaction = (stats) => { if (stats.total === 0) return 0; const promotores = stats.muy_positivas + stats.positivas; const detractores = stats.negativas + stats.muy_negativas; return Math.round(((promotores - detractores) / stats.total) * 100); };
 
 const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
+
+// --- FUNCIÓN DE PARSEO DE FECHA A PRUEBA DE FALLOS ---
+function parseDateTime(fechaCell, horaCell) {
+    if (!fechaCell || !horaCell) return null;
+
+    let baseDate = fechaCell instanceof Date ? fechaCell : new Date(fechaCell);
+    if (isNaN(baseDate.getTime())) return null;
+
+    let hours = 0, minutes = 0, seconds = 0;
+    if (horaCell instanceof Date) {
+        hours = horaCell.getUTCHours();
+        minutes = horaCell.getUTCMinutes();
+        seconds = horaCell.getUTCSeconds();
+    } else if (typeof horaCell === 'number') { // Formato decimal de Excel para la hora
+        const totalSeconds = Math.round(horaCell * 86400);
+        hours = Math.floor(totalSeconds / 3600) % 24;
+        minutes = Math.floor((totalSeconds % 3600) / 60);
+        seconds = totalSeconds % 60;
+    } else { return null; }
+
+    const finalDate = new Date(Date.UTC(baseDate.getUTCFullYear(), baseDate.getUTCMonth(), baseDate.getUTCDate(), hours, minutes, seconds));
+    if (isNaN(finalDate.getTime())) return null;
+    
+    return finalDate;
+}
+
 
 app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
     try {
@@ -43,28 +68,8 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
         worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
             if (rowNumber === 1) return;
             
-            // *** CORRECCIÓN CLAVE: Lógica para combinar fecha y hora correctamente ***
-            const fechaCell = row.getCell(columnMap['fecha']).value;
-            const horaCell = row.getCell(columnMap['hora']).value;
-            if (!fechaCell || !horaCell) return;
-
-            let baseDate = fechaCell instanceof Date ? fechaCell : new Date(fechaCell);
-            if (isNaN(baseDate.getTime())) return;
-
-            let hours = 0, minutes = 0, seconds = 0;
-            if (horaCell instanceof Date) {
-                hours = horaCell.getUTCHours();
-                minutes = horaCell.getUTCMinutes();
-                seconds = horaCell.getUTCSeconds();
-            } else if (typeof horaCell === 'number') { // Formato de hora de Excel (decimal)
-                const totalSeconds = Math.round(horaCell * 86400);
-                hours = Math.floor(totalSeconds / 3600);
-                minutes = Math.floor((totalSeconds % 3600) / 60);
-                seconds = totalSeconds % 60;
-            } else { return; }
-
-            const jsDate = new Date(Date.UTC(baseDate.getUTCFullYear(), baseDate.getUTCMonth(), baseDate.getUTCDate(), hours, minutes, seconds));
-            if (isNaN(jsDate.getTime())) return;
+            const jsDate = parseDateTime(row.getCell(columnMap['fecha']).value, row.getCell(columnMap['hora']).value);
+            if (!jsDate) return; // Si la fecha/hora no es válida, se salta la fila
 
             const diaSemana = DIAS_SEMANA[jsDate.getUTCDay()];
             const fechaStr = jsDate.toLocaleDateString('es-AR', { day: '2-digit', timeZone: 'UTC' });
@@ -104,10 +109,9 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
         });
 
         if (processedData.general.total === 0) {
-            return res.status(400).json({ success: false, message: 'El archivo no contiene filas con datos válidos.' });
+            return res.status(400).json({ success: false, message: 'El archivo no contiene filas con un formato de fecha y hora válidos.' });
         }
         
-        // *** CORRECCIÓN: Ahora se piden los 3 sectores principales ***
         const getTopItems = (obj, count = 3) => Object.entries(obj).sort(([, a], [, b]) => b - a).slice(0, count).map(([name]) => name).join(', ');
         for (const dia in processedData.porDia) {
             const detalles = dailyDetails[dia];
