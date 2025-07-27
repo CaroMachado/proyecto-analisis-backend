@@ -42,6 +42,14 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
                 columnMap[cell.value.toString().toLowerCase().trim().replace(/ /g, '_')] = colNumber;
             }
         });
+        
+        // Verificación de que las columnas necesarias existen
+        const requiredColumns = ['fecha', 'sector', 'ubicacion', 'calificacion_descripcion'];
+        for(const col of requiredColumns) {
+            if(!columnMap[col]) {
+                return res.status(400).json({ success: false, message: `El archivo Excel no contiene la columna requerida: "${col}"` });
+            }
+        }
 
         worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
             if (rowNumber === 1) return;
@@ -60,10 +68,10 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
             const sectorKey = sector && ubicacion ? `${sector} - ${ubicacion}` : (sector || ubicacion);
             if (!sectorKey) return;
 
-            const comentario = String(row.getCell(columnMap['comentarios']).value || '');
-            const puntoCritico = String(row.getCell(columnMap['puntos_criticos']).value || '').trim();
+            const comentario = String(row.getCell(columnMap['comentarios'])?.value || '');
+            const puntoCritico = String(row.getCell(columnMap['puntos_criticos'])?.value || '').trim();
             const calificacionDesc = String(row.getCell(columnMap['calificacion_descripcion']).value || '').trim();
-            const puntoDestacado = String(row.getCell(columnMap['destacados']).value || '').trim();
+            const puntoDestacado = String(row.getCell(columnMap['destacados'])?.value || '').trim();
 
             if (!processedData.porDia[diaSemana]) {
                 processedData.porDia[diaSemana] = { muy_positivas: 0, positivas: 0, negativas: 0, muy_negativas: 0, total: 0 };
