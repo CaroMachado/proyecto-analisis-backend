@@ -5,29 +5,42 @@ const ExcelJS = require('exceljs');
 const cors = require('cors');
 
 const app = express();
-// Habilita CORS para todas las peticiones. Esto es lo primero que debe hacer la app.
-app.use(cors()); 
+app.use(cors());
 const PORT = process.env.PORT || 3000;
 
 // --- FUNCIONES AUXILIARES ---
 const STOPWORDS = ['de','la','que','el','en','y','a','los','del','se','las','por','un','para','con','no','una','su','al','lo','como','más','pero','sus','le','ya','o','este','ha','me','si','sin','sobre','este','muy','cuando','también','hasta','hay','donde','quien','desde','todo','nos','durante','uno','ni','contra','ese','eso','mi','qué','e','son','fue','muy','gracias','hola','buen','dia','punto','puntos'];
 function getWordsFromString(text) { if (!text || typeof text !== 'string') return []; return text.toLowerCase().match(/\b(\w+)\b/g)?.filter(word => !STOPWORDS.includes(word) && word.length > 3) || []; }
 const calculateSatisfaction = (stats) => { if (stats.total === 0) return 0; const promotores = stats.muy_positivas + stats.positivas; const detractores = stats.negativas + stats.muy_negativas; return Math.round(((promotores - detractores) / stats.total) * 100); };
+
+// --- FUNCIÓN DE PARSEO DE FECHA Y HORA A PRUEBA DE FALLOS ---
 function parseDateTime(fechaCell, horaCell) {
     try {
         if (!fechaCell || !horaCell) return null;
+        
         let baseDate = fechaCell instanceof Date ? fechaCell : new Date(fechaCell);
         if (isNaN(baseDate.getTime())) return null;
+
         let hours = 0, minutes = 0, seconds = 0;
-        if (horaCell instanceof Date) {
-            hours = horaCell.getUTCHours(); minutes = horaCell.getUTCMinutes(); seconds = horaCell.getUTCSeconds();
-        } else if (typeof horaCell === 'number') {
-            const totalSeconds = Math.round(horaCell * 86400);
-            hours = Math.floor(totalSeconds / 3600) % 24; minutes = Math.floor((totalSeconds % 3600) / 60); seconds = totalSeconds % 60;
-        } else { return null; }
+        if (horaCell instanceof Date) { // Si Excel ya lo interpreta como fecha/hora
+            hours = horaCell.getUTCHours();
+            minutes = horaCell.getUTCMinutes();
+            seconds = horaCell.getUTCSeconds();
+        } else if (typeof horaCell === 'number') { // Formato decimal de Excel para la hora (ej: 0.5 es mediodía)
+            const totalSecondsInDay = horaCell * 86400;
+            hours = Math.floor(totalSecondsInDay / 3600) % 24;
+            minutes = Math.floor((totalSecondsInDay % 3600) / 60);
+            seconds = Math.floor(totalSecondsInDay % 60);
+        } else { return null; } // Si no es ninguno de los formatos esperados, la fila es inválida
+
+        // Se crea la fecha final combinando la base de la fecha con la hora extraída
         const finalDate = new Date(Date.UTC(baseDate.getUTCFullYear(), baseDate.getUTCMonth(), baseDate.getUTCDate(), hours, minutes, seconds));
+        
         return isNaN(finalDate.getTime()) ? null : finalDate;
-    } catch (e) { return null; }
+    } catch (e) {
+        // Si cualquier cosa falla, se considera la fila inválida para no crashear
+        return null;
+    }
 }
 
 const storage = multer.memoryStorage();
@@ -61,10 +74,10 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
             if (rowNumber === 1) return;
             
             // *** SISTEMA ANTI-CRASH ***
-            // Si una fila tiene datos corruptos, el try/catch la ignorará y continuará con la siguiente
+            // La lógica está dentro de un try/catch por fila. Si una falla, se ignora y continúa.
             try {
                 const jsDate = parseDateTime(row.getCell(columnMap['fecha']).value, row.getCell(columnMap['hora']).value);
-                if (!jsDate) return;
+                if (!jsDate) return; // Si la fecha/hora no es válida, se salta la fila
 
                 const diaSemana = DIAS_SEMANA[jsDate.getUTCDay()];
                 const fechaStr = jsDate.toLocaleDateString('es-AR', { day: '2-digit', timeZone: 'UTC' });
@@ -102,12 +115,12 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
                     case 'Muy Negativa': processedData.general.muy_negativas++; processedData.porDia[diaSemana].muy_negativas++; processedData.porHora[hora].muy_negativas++; processedData.porSector[sectorKey].muy_negativas++; dailyDetails[diaSemana].valoracionesPorHora[hora].muy_negativas++; dailyDetails[diaSemana].valoracionesPorHora[hora].sectoresNegativos[sectorKey] = (dailyDetails[diaSemana].valoracionesPorHora[hora].sectoresNegativos[sectorKey] || 0) + 1; if (comentario) processedData.comentarios.negativos.push(...getWordsFromString(comentario)); break;
                 }
             } catch (e) {
-                console.warn(`Se ignoró la fila ${rowNumber} por un error de formato:`, e.message);
+                console.warn(`Se ignoró la fila ${rowNumber} por un error de formato.`);
             }
         });
 
         if (processedData.general.total === 0) {
-            return res.status(400).json({ success: false, message: 'El archivo no contiene filas con datos válidos.' });
+            return res.status(400).json({ success: false, message: 'El archivo no contiene filas con un formato de fecha y hora válidos.' });
         }
         
         const getTopItems = (obj, count = 3) => Object.entries(obj).sort(([, a], [, b]) => b - a).slice(0, count).map(([name]) => name).join(', ');
