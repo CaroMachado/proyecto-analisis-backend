@@ -1,15 +1,17 @@
-// server.js FINAL Y CORRECTO
+// server.js -> PARA RENDER
 const express = require('express');
 const multer = require('multer');
-const ExcelJS = require('exceljs'); // La nueva librería eficiente
+const ExcelJS = require('exceljs');
 const path = require('path');
 const stream = require('stream');
+const cors = require('cors'); // Se añade CORS
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(express.static(path.join(__dirname, 'public')));
-app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+// *** CONFIGURACIÓN ESENCIAL DE CORS ***
+// Esto le da permiso a tu página en Hostinger para que pueda hacerle peticiones a este servidor.
+app.use(cors());
 
 const STOPWORDS = ['de','la','que','el','en','y','a','los','del','se','las','por','un','para','con','no','una','su','al','lo','como','más','pero','sus','le','ya','o','este','ha','me','si','sin','sobre','este','muy','cuando','también','hasta','hay','donde','quien','desde','todo','nos','durante','uno','ni','contra','ese','eso','mi','qué','e','son','fue','muy','gracias','hola','buen','dia','punto','puntos'];
 function getWordsFromString(text) { if (!text || typeof text !== 'string') return []; const textLower = text.toLowerCase(); const words = textLower.match(/\b(\w+)\b/g) || []; return words.filter(word => !STOPWORDS.includes(word) && word.length > 3); }
@@ -29,32 +31,32 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
         const DIAS_SEMANA = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 
         const workbook = new ExcelJS.Workbook();
-        const buffer = req.file.buffer;
-        const readStream = new stream.PassThrough();
-        readStream.end(buffer);
-
-        await workbook.xlsx.read(readStream);
+        await workbook.xlsx.load(req.file.buffer);
         
         const worksheet = workbook.worksheets[0];
         worksheet.eachRow({ includeEmpty: false }, function(row, rowNumber) {
             if (rowNumber === 1) return;
 
-            const fechaCell = row.getCell(1).value;
-            if (!fechaCell || !(fechaCell instanceof Date)) return;
-
-            const jsDate = fechaCell;
+            const fechaCell = row.getCell('A').value;
+            if (!fechaCell) return;
+            
+            let jsDate = fechaCell instanceof Date ? fechaCell : new Date(fechaCell);
+            if (isNaN(jsDate.getTime())) return;
+            
             const diaSemana = DIAS_SEMANA[jsDate.getDay()];
             const fecha = jsDate.toLocaleDateString('es-AR', { day: '2-digit' });
             const hora = jsDate.getHours();
             uniqueDates[fecha] = true;
 
-            const sector = String(row.getCell(4).value || '').trim();
-            const ubicacion = String(row.getCell(5).value || '').trim();
-            const sectorKey = `${sector} - ${ubicacion}`;
-            const comentario = String(row.getCell(6).value || '');
-            const puntoCritico = String(row.getCell(8).value || '').trim();
-            const calificacionDesc = String(row.getCell(9).value || '').trim();
-            const puntoDestacado = String(row.getCell(10).value || '').trim();
+            const sector = String(row.getCell('D').value || '').trim();
+            const ubicacion = String(row.getCell('E').value || '').trim();
+            const sectorKey = sector && ubicacion ? `${sector} - ${ubicacion}` : (sector || ubicacion);
+            if (!sectorKey) return;
+
+            const comentario = String(row.getCell('F').value || '');
+            const puntoCritico = String(row.getCell('H').value || '').trim();
+            const calificacionDesc = String(row.getCell('I').value || '').trim();
+            const puntoDestacado = String(row.getCell('J').value || '').trim();
 
             if (!processedData.porDia[diaSemana]) { processedData.porDia[diaSemana] = { muy_positivas: 0, positivas: 0, negativas: 0, muy_negativas: 0, total: 0, criticos: {}, destacados: {} }; }
             if (!processedData.porSector[sectorKey]) { processedData.porSector[sectorKey] = { muy_positivas: 0, positivas: 0, negativas: 0, muy_negativas: 0, total: 0 }; }
@@ -76,7 +78,7 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
         });
 
         if (processedData.general.total === 0) {
-            return res.status(400).json({ success: false, message: 'No se encontraron filas con datos válidos en el archivo.' });
+            return res.status(400).json({ success: false, message: 'No se encontraron filas con datos de fecha válidos en el archivo Excel.' });
         }
 
         processedData.fechas = Object.keys(uniqueDates);
@@ -88,7 +90,6 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
         processedData.nubes = { positiva: countWords(processedData.comentarios.positivos), negativa: countWords(processedData.comentarios.negativos) };
         
         res.json({ success: true, data: processedData });
-
     } catch (error) {
         console.error('Error fatal al procesar el archivo:', error);
         res.status(500).json({ success: false, message: 'Hubo un error crítico al leer el archivo Excel.' });
