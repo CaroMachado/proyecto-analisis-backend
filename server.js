@@ -1,4 +1,3 @@
-// Importar las librerías necesarias
 const express = require('express');
 const multer = require('multer');
 const xlsx = require('xlsx');
@@ -7,11 +6,18 @@ const path = require('path');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// *** CAMBIO CLAVE ***
+// Primero, definimos que la carpeta 'public' contiene nuestros archivos estáticos.
 app.use(express.static(path.join(__dirname, 'public')));
 
-const storage = multer.memoryStorage();
-const upload = multer({ storage: storage });
+// Segundo, definimos explícitamente la ruta principal.
+// Cuando alguien visite la raíz de tu web, le enviaremos el archivo index.html
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
 
+
+// El resto del código que ya tenías para procesar el Excel sigue igual.
 const STOPWORDS = [
     'de', 'la', 'que', 'el', 'en', 'y', 'a', 'los', 'del', 'se', 'las', 'por', 'un',
     'para', 'con', 'no', 'una', 'su', 'al', 'lo', 'como', 'más', 'pero', 'sus',
@@ -28,10 +34,6 @@ function getWordsFromString(text) {
     return words.filter(word => !STOPWORDS.includes(word) && word.length > 3);
 }
 
-// *** FUNCIÓN DE CÁLCULO DE SATISFACCIÓN CORREGIDA ***
-// Fórmula: ((% Promotores - % Detractores)) -> Resultado de -100 a 100
-// Promotores: Muy Positivas + Positivas
-// Detractores: Muy Negativas + Negativas
 const calculateSatisfaction = (stats) => {
     if (stats.total === 0) return 0;
     const promotores = stats.muy_positivas + stats.positivas;
@@ -39,6 +41,8 @@ const calculateSatisfaction = (stats) => {
     return Math.round(((promotores - detractores) / stats.total) * 100);
 };
 
+const storage = multer.memoryStorage();
+const upload = multer({ storage: storage });
 
 app.post('/procesar', upload.single('archivoExcel'), (req, res) => {
     try {
@@ -50,8 +54,6 @@ app.post('/procesar', upload.single('archivoExcel'), (req, res) => {
         const sheetName = workbook.SheetNames[0];
         const sheet = workbook.Sheets[sheetName];
         
-        // *** LÓGICA DE LECTURA DE EXCEL MEJORADA ***
-        // Se usa `cellDates: true` para que las fechas se conviertan a objetos de JS
         const data = xlsx.utils.sheet_to_json(sheet, { header: 1, cellDates: true, raw: false });
 
         let processedData = {
@@ -61,7 +63,6 @@ app.post('/procesar', upload.single('archivoExcel'), (req, res) => {
             porSector: {},
             comentarios: { positivos: [], negativos: [] },
             fechas: [],
-            // *** NUEVO: Para guardar los puntos clave ***
             puntosCriticos: {},
             puntosDestacados: {}
         };
@@ -69,10 +70,9 @@ app.post('/procesar', upload.single('archivoExcel'), (req, res) => {
         let uniqueDates = {};
         const DIAS_SEMANA = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 
-        // Empezar desde la fila 1 para saltar el encabezado
         for (let i = 1; i < data.length; i++) {
             const row = data[i];
-            if (!row[0] || !(row[0] instanceof Date)) continue; // Saltar si no hay fecha o no es válida
+            if (!row[0] || !(row[0] instanceof Date)) continue;
 
             const jsDate = row[0];
             const diaSemana = DIAS_SEMANA[jsDate.getDay()];
@@ -87,9 +87,8 @@ app.post('/procesar', upload.single('archivoExcel'), (req, res) => {
             const calificacionDesc = (row[7] || '').trim();
             const comentario = (row[4] || '');
             
-            // *** NUEVO: Leer las columnas de puntos críticos y destacados ***
-            const puntoCritico = (row[8] || '').trim(); // Columna I
-            const puntoDestacado = (row[9] || '').trim(); // Columna J
+            const puntoCritico = (row[8] || '').trim();
+            const puntoDestacado = (row[9] || '').trim();
 
             if (!processedData.porDia[diaSemana]) {
                 processedData.porDia[diaSemana] = { muy_positivas: 0, positivas: 0, negativas: 0, muy_negativas: 0, total: 0, criticos: {}, destacados: {} };
@@ -103,7 +102,6 @@ app.post('/procesar', upload.single('archivoExcel'), (req, res) => {
             processedData.porHora[hora].total++;
             processedData.porSector[sectorKey].total++;
 
-            // Contar puntos críticos y destacados por día
             if (puntoCritico) {
                 processedData.porDia[diaSemana].criticos[puntoCritico] = (processedData.porDia[diaSemana].criticos[puntoCritico] || 0) + 1;
             }
@@ -144,7 +142,6 @@ app.post('/procesar', upload.single('archivoExcel'), (req, res) => {
         }
         
         processedData.fechas = Object.keys(uniqueDates);
-
         processedData.general.satisfaccion = calculateSatisfaction(processedData.general);
         for (const dia in processedData.porDia) {
             processedData.porDia[dia].satisfaccion = calculateSatisfaction(processedData.porDia[dia]);
