@@ -1,4 +1,4 @@
-/// server.js - VERSIÓN FINAL, ROBUSTA Y FUNCIONAL EN PRODUCCIÓN
+// server.js - VERSIÓN FINAL, ROBUSTA Y FUNCIONAL EN PRODUCCIÓN
 const express = require('express');
 const multer = require('multer');
 const ExcelJS = require('exceljs');
@@ -35,11 +35,16 @@ function parseDateTime(fechaCell, horaCell) {
             hours = horaCell.getUTCHours();
             minutes = horaCell.getUTCMinutes();
             seconds = horaCell.getUTCSeconds();
-        } else if (typeof horaCell === 'number') { // Formato decimal de Excel para la hora (ej: 0.5 es mediodía)
+        } else if (typeof horaCell === 'number') { // Formato decimal de Excel
             const totalSecondsInDay = horaCell * 86400;
             hours = Math.floor(totalSecondsInDay / 3600) % 24;
             minutes = Math.floor((totalSecondsInDay % 3600) / 60);
             seconds = Math.floor(totalSecondsInDay % 60);
+        } else if (typeof horaCell === 'string') { // Formato de texto "HH:mm:ss"
+            const parts = horaCell.split(':');
+            hours = parseInt(parts[0], 10) || 0;
+            minutes = parseInt(parts[1], 10) || 0;
+            seconds = parseInt(parts[2], 10) || 0;
         } else {
             return null;
         }
@@ -77,7 +82,6 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
         let columnMap = {};
         worksheet.getRow(1).eachCell((cell, colNumber) => {
             if (cell.value) {
-                // Normaliza los nombres de las columnas para evitar errores
                 columnMap[cell.value.toString().toLowerCase().trim().replace(/ /g, '_')] = colNumber;
             }
         });
@@ -93,7 +97,7 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
             if (rowNumber === 1) return;
             try {
                 const jsDate = parseDateTime(row.getCell(columnMap['fecha']).value, row.getCell(columnMap['hora']).value);
-                if (!jsDate) return; // Si la fecha/hora es inválida, se salta la fila
+                if (!jsDate) return;
 
                 const diaSemana = DIAS_SEMANA[jsDate.getUTCDay()];
                 const fechaStr = jsDate.toLocaleDateString('es-AR', { day: '2-digit', timeZone: 'UTC' });
