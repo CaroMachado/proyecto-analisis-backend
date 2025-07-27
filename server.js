@@ -5,7 +5,8 @@ const ExcelJS = require('exceljs');
 const cors = require('cors');
 
 const app = express();
-app.use(cors()); // Habilita CORS para que Hostinger pueda hablar con Render
+// Habilita CORS para todas las peticiones. Esto es lo primero que debe hacer la app.
+app.use(cors()); 
 const PORT = process.env.PORT || 3000;
 
 // Constantes y funciones auxiliares
@@ -20,14 +21,8 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
     try {
         if (!req.file) return res.status(400).json({ success: false, message: 'No se subió ningún archivo.' });
 
-        const processedData = {
-            general: { muy_positivas: 0, positivas: 0, negativas: 0, muy_negativas: 0, total: 0 },
-            porDia: {},
-            porHora: Array.from({ length: 24 }, () => ({ muy_positivas: 0, positivas: 0, negativas: 0, muy_negativas: 0, total: 0 })),
-            porSector: {},
-            comentarios: { positivos: [], negativos: [] },
-            fechas: [],
-        };
+        // Estructuras de datos para el análisis
+        const processedData = { general: { muy_positivas: 0, positivas: 0, negativas: 0, muy_negativas: 0, total: 0 }, porDia: {}, porHora: Array.from({ length: 24 }, () => ({ muy_positivas: 0, positivas: 0, negativas: 0, muy_negativas: 0, total: 0 })), porSector: {}, comentarios: { positivos: [], negativos: [] }, fechas: [], };
         const dailyDetails = {};
         const DIAS_SEMANA = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 
@@ -39,11 +34,13 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
         let columnMap = {};
         worksheet.getRow(1).eachCell((cell, colNumber) => {
             if (cell.value) {
+                // Normaliza los nombres de las columnas para evitar errores de espacios o mayúsculas
                 columnMap[cell.value.toString().toLowerCase().trim().replace(/ /g, '_')] = colNumber;
             }
         });
         
-        // Verificación de que las columnas necesarias existen
+        // *** GUARDARRAIL ANTI-CRASH ***
+        // Verifica que las columnas esenciales existan ANTES de procesar
         const requiredColumns = ['fecha', 'sector', 'ubicacion', 'calificacion_descripcion'];
         for(const col of requiredColumns) {
             if(!columnMap[col]) {
@@ -99,7 +96,7 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
         });
 
         if (processedData.general.total === 0) {
-            return res.status(400).json({ success: false, message: 'El archivo no contiene filas con un formato de fecha válido en la columna "fecha".' });
+            return res.status(400).json({ success: false, message: 'El archivo no contiene filas con datos válidos.' });
         }
         
         const getTopItems = (obj, count = 1) => Object.entries(obj).sort(([, a], [, b]) => b - a).slice(0, count).map(([name]) => name).join(', ');
