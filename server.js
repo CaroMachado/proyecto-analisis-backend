@@ -1,15 +1,12 @@
-// server.js - VERSIÓN FINAL CON CORS CORREGIDO Y ROBUSTO
+// server.js - VERSIÓN FINAL, ROBUSTA Y FUNCIONAL EN PRODUCCIÓN
 const express = require('express');
 const multer = require('multer');
 const ExcelJS = require('exceljs');
 const cors = require('cors');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
-
-// ✅ CONFIGURACIÓN DE CORS AMPLIA Y ROBUSTA
-// Acepta peticiones de cualquier origen. Esto elimina el error de CORS.
 app.use(cors());
+const PORT = process.env.PORT || 3000;
 
 // --- FUNCIONES AUXILIARES ---
 const STOPWORDS = ['de', 'la', 'que', 'el', 'en', 'y', 'a', 'los', 'del', 'se', 'las', 'por', 'un', 'para', 'con', 'no', 'una', 'su', 'al', 'lo', 'como', 'más', 'pero', 'sus', 'le', 'ya', 'o', 'este', 'ha', 'me', 'si', 'sin', 'sobre', 'muy', 'cuando', 'también', 'hasta', 'hay', 'donde', 'quien', 'desde', 'todo', 'nos', 'durante', 'uno', 'ni', 'contra', 'ese', 'eso', 'mi', 'qué', 'e', 'son', 'fue', 'gracias', 'hola', 'buen', 'dia', 'punto', 'puntos'];
@@ -26,6 +23,7 @@ function calculateSatisfaction(stats) {
     return Math.round(((promotores - detractores) / stats.total) * 100);
 }
 
+// --- FUNCIÓN DE PARSEO DE FECHA Y HORA A PRUEBA DE FALLOS ---
 function parseDateTime(fechaCell, horaCell) {
     try {
         if (!fechaCell || !horaCell) return null;
@@ -37,7 +35,7 @@ function parseDateTime(fechaCell, horaCell) {
             hours = horaCell.getUTCHours();
             minutes = horaCell.getUTCMinutes();
             seconds = horaCell.getUTCSeconds();
-        } else if (typeof horaCell === 'number') {
+        } else if (typeof horaCell === 'number') { // Formato decimal de Excel para la hora (ej: 0.5 es mediodía)
             const totalSecondsInDay = horaCell * 86400;
             hours = Math.floor(totalSecondsInDay / 3600) % 24;
             minutes = Math.floor((totalSecondsInDay % 3600) / 60);
@@ -79,6 +77,7 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
         let columnMap = {};
         worksheet.getRow(1).eachCell((cell, colNumber) => {
             if (cell.value) {
+                // Normaliza los nombres de las columnas para evitar errores
                 columnMap[cell.value.toString().toLowerCase().trim().replace(/ /g, '_')] = colNumber;
             }
         });
@@ -94,7 +93,7 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
             if (rowNumber === 1) return;
             try {
                 const jsDate = parseDateTime(row.getCell(columnMap['fecha']).value, row.getCell(columnMap['hora']).value);
-                if (!jsDate) return;
+                if (!jsDate) return; // Si la fecha/hora es inválida, se salta la fila
 
                 const diaSemana = DIAS_SEMANA[jsDate.getUTCDay()];
                 const fechaStr = jsDate.toLocaleDateString('es-AR', { day: '2-digit', timeZone: 'UTC' });
