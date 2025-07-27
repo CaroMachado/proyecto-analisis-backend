@@ -1,11 +1,11 @@
-// server.js - VERSIÓN FINAL A PRUEBA DE FALLOS Y CON LECTURA POR ENCABEZADOS
+// server.js - VERSIÓN FINAL Y ROBUSTA
 const express = require('express');
 const multer = require('multer');
 const ExcelJS = require('exceljs');
-const cors =require('cors');
+const cors = require('cors');
 
 const app = express();
-app.use(cors());
+app.use(cors()); // Habilita CORS para que Hostinger pueda hablar con Render
 const PORT = process.env.PORT || 3000;
 
 // Constantes y funciones auxiliares
@@ -20,38 +20,37 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
     try {
         if (!req.file) return res.status(400).json({ success: false, message: 'No se subió ningún archivo.' });
 
-        // Estructuras de datos para el análisis
-        const processedData = { general: { muy_positivas: 0, positivas: 0, negativas: 0, muy_negativas: 0, total: 0 }, porDia: {}, porHora: Array.from({ length: 24 }, () => ({ muy_positivas: 0, positivas: 0, negativas: 0, muy_negativas: 0, total: 0 })), porSector: {}, comentarios: { positivos: [], negativos: [] }, fechas: [], };
+        const processedData = {
+            general: { muy_positivas: 0, positivas: 0, negativas: 0, muy_negativas: 0, total: 0 },
+            porDia: {},
+            porHora: Array.from({ length: 24 }, () => ({ muy_positivas: 0, positivas: 0, negativas: 0, muy_negativas: 0, total: 0 })),
+            porSector: {},
+            comentarios: { positivos: [], negativos: [] },
+            fechas: [],
+        };
         const dailyDetails = {};
         const DIAS_SEMANA = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 
         const workbook = new ExcelJS.Workbook();
         await workbook.xlsx.load(req.file.buffer);
-        
         const worksheet = workbook.worksheets[0];
 
-        // *** NUEVO: LECTURA POR NOMBRE DE ENCABEZADO ***
+        // Lógica de lectura robusta por nombre de encabezado
         let columnMap = {};
         worksheet.getRow(1).eachCell((cell, colNumber) => {
-            columnMap[cell.value.toLowerCase().trim()] = colNumber;
+            if (cell.value) {
+                columnMap[cell.value.toString().toLowerCase().trim().replace(/ /g, '_')] = colNumber;
+            }
         });
 
         worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
             if (rowNumber === 1) return;
-
-            // *** NUEVO: LÓGICA DE VALIDACIÓN DE FECHA A PRUEBA DE FALLOS ***
+            
             const fechaCell = row.getCell(columnMap['fecha']).value;
             if (!fechaCell) return;
             let jsDate = fechaCell instanceof Date ? fechaCell : new Date(fechaCell);
-            if (isNaN(jsDate.getTime())) {
-                // Intenta un segundo método si el primero falla (común con fechas de Excel)
-                const excelDate = row.getCell(columnMap['fecha']).value;
-                if (typeof excelDate === 'number') {
-                    jsDate = new Date(Date.UTC(1900, 0, excelDate - 1));
-                } else { return; } // Si sigue sin ser fecha válida, se salta la fila
-            }
             if (isNaN(jsDate.getTime())) return;
-
+            
             const diaSemana = DIAS_SEMANA[jsDate.getUTCDay()];
             const fecha = jsDate.toLocaleDateString('es-AR', { day: '2-digit', timeZone: 'UTC' });
             const hora = jsDate.getUTCHours();
@@ -66,7 +65,6 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
             const calificacionDesc = String(row.getCell(columnMap['calificacion_descripcion']).value || '').trim();
             const puntoDestacado = String(row.getCell(columnMap['destacados']).value || '').trim();
 
-            // Inicialización de estructuras
             if (!processedData.porDia[diaSemana]) {
                 processedData.porDia[diaSemana] = { muy_positivas: 0, positivas: 0, negativas: 0, muy_negativas: 0, total: 0 };
                 dailyDetails[diaSemana] = { valoracionesPorHora: Array.from({ length: 24 }, () => ({ muy_positivas: 0, muy_negativas: 0, sectoresPositivos: {}, sectoresNegativos: {} })), criticos: {}, destacados: {} };
@@ -76,7 +74,6 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
                 processedData.porSector[sectorKey] = { muy_positivas: 0, positivas: 0, negativas: 0, muy_negativas: 0, total: 0 };
             }
 
-            // Acumuladores
             processedData.general.total++;
             processedData.porDia[diaSemana].total++;
             processedData.porHora[hora].total++;
@@ -97,7 +94,6 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
             return res.status(400).json({ success: false, message: 'El archivo no contiene filas con un formato de fecha válido en la columna "fecha".' });
         }
         
-        // Post-procesamiento para análisis detallado
         const getTopItems = (obj, count = 1) => Object.entries(obj).sort(([, a], [, b]) => b - a).slice(0, count).map(([name]) => name).join(', ');
         for (const dia in processedData.porDia) {
             const detalles = dailyDetails[dia];
@@ -106,7 +102,6 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
             processedData.porDia[dia].analisis = { picoPositivo, picoNegativo, sectorPicoPositivo: picoPositivo.hora !== -1 ? getTopItems(detalles.valoracionesPorHora[picoPositivo.hora].sectoresPositivos) : 'N/A', sectorPicoNegativo: picoNegativo.hora !== -1 ? getTopItems(detalles.valoracionesPorHora[picoNegativo.hora].sectoresNegativos) : 'N/A', topDestacados: getTopItems(detalles.destacados, 4) || 'varios motivos', topCriticos: getTopItems(detalles.criticos, 5) || 'varios motivos' };
         }
 
-        // Cálculos finales y envío de respuesta
         processedData.general.satisfaccion = calculateSatisfaction(processedData.general);
         for (const dia in processedData.porDia) { processedData.porDia[dia].satisfaccion = calculateSatisfaction(processedData.porDia[dia]); }
         for (const hora in processedData.porHora) { processedData.porHora[hora].satisfaccion = calculateSatisfaction(processedData.porHora[hora]); }
