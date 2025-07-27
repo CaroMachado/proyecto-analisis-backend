@@ -1,12 +1,11 @@
-// server.js - VERSIÓN FINAL Y ROBUSTA
+// server.js - VERSIÓN FINAL CON CORRECCIÓN DE HORA Y ANÁLISIS MEJORADO
 const express = require('express');
 const multer = require('multer');
 const ExcelJS = require('exceljs');
 const cors = require('cors');
 
 const app = express();
-// Habilita CORS para todas las peticiones. Esto es lo primero que debe hacer la app.
-app.use(cors()); 
+app.use(cors());
 const PORT = process.env.PORT || 3000;
 
 // Constantes y funciones auxiliares
@@ -21,7 +20,6 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
     try {
         if (!req.file) return res.status(400).json({ success: false, message: 'No se subió ningún archivo.' });
 
-        // Estructuras de datos para el análisis
         const processedData = { general: { muy_positivas: 0, positivas: 0, negativas: 0, muy_negativas: 0, total: 0 }, porDia: {}, porHora: Array.from({ length: 24 }, () => ({ muy_positivas: 0, positivas: 0, negativas: 0, muy_negativas: 0, total: 0 })), porSector: {}, comentarios: { positivos: [], negativos: [] }, fechas: [], };
         const dailyDetails = {};
         const DIAS_SEMANA = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
@@ -30,18 +28,12 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
         await workbook.xlsx.load(req.file.buffer);
         const worksheet = workbook.worksheets[0];
 
-        // Lógica de lectura robusta por nombre de encabezado
         let columnMap = {};
         worksheet.getRow(1).eachCell((cell, colNumber) => {
-            if (cell.value) {
-                // Normaliza los nombres de las columnas para evitar errores de espacios o mayúsculas
-                columnMap[cell.value.toString().toLowerCase().trim().replace(/ /g, '_')] = colNumber;
-            }
+            if (cell.value) { columnMap[cell.value.toString().toLowerCase().trim().replace(/ /g, '_')] = colNumber; }
         });
         
-        // *** GUARDARRAIL ANTI-CRASH ***
-        // Verifica que las columnas esenciales existan ANTES de procesar
-        const requiredColumns = ['fecha', 'sector', 'ubicacion', 'calificacion_descripcion'];
+        const requiredColumns = ['fecha', 'hora', 'sector', 'ubicacion', 'calificacion_descripcion'];
         for(const col of requiredColumns) {
             if(!columnMap[col]) {
                 return res.status(400).json({ success: false, message: `El archivo Excel no contiene la columna requerida: "${col}"` });
@@ -51,13 +43,31 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
         worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
             if (rowNumber === 1) return;
             
+            // *** CORRECCIÓN CLAVE: Lógica para combinar fecha y hora correctamente ***
             const fechaCell = row.getCell(columnMap['fecha']).value;
-            if (!fechaCell) return;
-            let jsDate = fechaCell instanceof Date ? fechaCell : new Date(fechaCell);
+            const horaCell = row.getCell(columnMap['hora']).value;
+            if (!fechaCell || !horaCell) return;
+
+            let baseDate = fechaCell instanceof Date ? fechaCell : new Date(fechaCell);
+            if (isNaN(baseDate.getTime())) return;
+
+            let hours = 0, minutes = 0, seconds = 0;
+            if (horaCell instanceof Date) {
+                hours = horaCell.getUTCHours();
+                minutes = horaCell.getUTCMinutes();
+                seconds = horaCell.getUTCSeconds();
+            } else if (typeof horaCell === 'number') { // Formato de hora de Excel (decimal)
+                const totalSeconds = Math.round(horaCell * 86400);
+                hours = Math.floor(totalSeconds / 3600);
+                minutes = Math.floor((totalSeconds % 3600) / 60);
+                seconds = totalSeconds % 60;
+            } else { return; }
+
+            const jsDate = new Date(Date.UTC(baseDate.getUTCFullYear(), baseDate.getUTCMonth(), baseDate.getUTCDate(), hours, minutes, seconds));
             if (isNaN(jsDate.getTime())) return;
-            
+
             const diaSemana = DIAS_SEMANA[jsDate.getUTCDay()];
-            const fecha = jsDate.toLocaleDateString('es-AR', { day: '2-digit', timeZone: 'UTC' });
+            const fechaStr = jsDate.toLocaleDateString('es-AR', { day: '2-digit', timeZone: 'UTC' });
             const hora = jsDate.getUTCHours();
             
             const sector = String(row.getCell(columnMap['sector']).value || '').trim();
@@ -73,11 +83,9 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
             if (!processedData.porDia[diaSemana]) {
                 processedData.porDia[diaSemana] = { muy_positivas: 0, positivas: 0, negativas: 0, muy_negativas: 0, total: 0 };
                 dailyDetails[diaSemana] = { valoracionesPorHora: Array.from({ length: 24 }, () => ({ muy_positivas: 0, muy_negativas: 0, sectoresPositivos: {}, sectoresNegativos: {} })), criticos: {}, destacados: {} };
-                if (!processedData.fechas.includes(fecha)) processedData.fechas.push(fecha);
+                if (!processedData.fechas.includes(fechaStr)) processedData.fechas.push(fechaStr);
             }
-            if (!processedData.porSector[sectorKey]) {
-                processedData.porSector[sectorKey] = { muy_positivas: 0, positivas: 0, negativas: 0, muy_negativas: 0, total: 0 };
-            }
+            if (!processedData.porSector[sectorKey]) { processedData.porSector[sectorKey] = { muy_positivas: 0, positivas: 0, negativas: 0, muy_negativas: 0, total: 0 }; }
 
             processedData.general.total++;
             processedData.porDia[diaSemana].total++;
@@ -99,7 +107,8 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
             return res.status(400).json({ success: false, message: 'El archivo no contiene filas con datos válidos.' });
         }
         
-        const getTopItems = (obj, count = 1) => Object.entries(obj).sort(([, a], [, b]) => b - a).slice(0, count).map(([name]) => name).join(', ');
+        // *** CORRECCIÓN: Ahora se piden los 3 sectores principales ***
+        const getTopItems = (obj, count = 3) => Object.entries(obj).sort(([, a], [, b]) => b - a).slice(0, count).map(([name]) => name).join(', ');
         for (const dia in processedData.porDia) {
             const detalles = dailyDetails[dia];
             const picoPositivo = detalles.valoracionesPorHora.reduce((p, c, i) => c.muy_positivas > p.count ? { hora: i, count: c.muy_positivas } : p, { hora: -1, count: -1 });
