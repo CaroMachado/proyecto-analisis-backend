@@ -66,7 +66,7 @@ app.post('/procesar', upload.single('archivoExcel'), (req, res) => {
 
         for (let i = 1; i < data.length; i++) {
             const row = data[i];
-            if (!row[0] || !(row[0] instanceof Date)) continue;
+            if (!row || !row[0] || !(row[0] instanceof Date)) continue;
 
             const jsDate = row[0];
             const diaSemana = DIAS_SEMANA[jsDate.getDay()];
@@ -74,16 +74,15 @@ app.post('/procesar', upload.single('archivoExcel'), (req, res) => {
             const hora = jsDate.getHours();
             
             uniqueDates[fecha] = true;
-
-            // *** CORRECCIÓN: Ajuste de los índices de las columnas para que coincidan con tu Excel ***
-            const sector = (row[3] || '').trim();             // Columna D
-            const ubicacion = (row[4] || '').trim();          // Columna E
+            
+            // *** SOLUCIÓN: Convertir a String antes de usar .trim() para evitar errores ***
+            const sector = String(row[3] || '').trim();
+            const ubicacion = String(row[4] || '').trim();
             const sectorKey = `${sector} - ${ubicacion}`;
-            const comentario = (row[5] || '');                 // Columna F
-            const puntoCritico = (row[7] || '').trim();      // Columna H
-            const calificacionDesc = (row[8] || '').trim();  // Columna I
-            const puntoDestacado = (row[9] || '').trim();    // Columna J
-
+            const comentario = String(row[5] || '');
+            const puntoCritico = String(row[7] || '').trim();
+            const calificacionDesc = String(row[8] || '').trim();
+            const puntoDestacado = String(row[9] || '').trim();
 
             if (!processedData.porDia[diaSemana]) {
                 processedData.porDia[diaSemana] = { muy_positivas: 0, positivas: 0, negativas: 0, muy_negativas: 0, total: 0, criticos: {}, destacados: {} };
