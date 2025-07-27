@@ -1,1 +1,43 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Generador de Informes de Satisfacción - Hipódromo de Palermo</title>
+    <!-- La ruta al CSS es correcta porque el servidor lo sirve desde la carpeta public -->
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Generador de Informes de Satisfacción</h1>
+            <p>Sube el archivo Excel del fin de semana para generar el reporte.</p>
+        </header>
 
+        <form id="uploadForm" enctype="multipart/form-data">
+            <input type="file" id="archivoExcel" name="archivoExcel" accept=".xlsx, .xls" required>
+            <button type="submit">Procesar y Generar Informe</button>
+        </form>
+        
+        <div id="loader" class="loader" style="display: none;"></div>
+        <div id="error" class="error-message" style="display: none;"></div>
+
+        <button id="downloadPdf" style="display: none;">Descargar Informe en PDF</button>
+
+        <!-- Contenedor donde se generará el informe dinámicamente -->
+        <div id="reporte-container">
+            <!-- El contenido del informe se insertará aquí con JavaScript -->
+        </div>
+    </div>
+
+    <!-- Librerías externas -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    
+    <!-- Scripts locales. Se añade 'defer' para asegurar que el HTML se cargue primero. -->
+    <script src="wordcloud2.js" defer></script> 
+    <script src="script.js" defer></script>
+    
+</body>
+</html>
