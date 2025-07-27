@@ -3,7 +3,7 @@ const express = require('express');
 const multer = require('multer');
 const ExcelJS = require('exceljs');
 const cors = require('cors');
-const axios = require('axios'); // Asegúrate de que este módulo esté instalado
+const axios = require('axios'); // Ya no dará error porque package.json lo instalará
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -35,13 +35,8 @@ function getWordsFromString(text) {
 function calculateSatisfaction(stats) {
     if (!stats || stats.total === 0) return 0;
     
-    // Solo "Muy Positivas" son promotores.
     const promotores = stats.muy_positivas || 0; 
-    
-    // Detractores son "Negativas" y "Muy Negativas".
     const detractores = (stats.negativas || 0) + (stats.muy_negativas || 0);
-    
-    // Aplicamos la fórmula: (% Promotores - % Detractores)
     const indice = ((promotores / stats.total) - (detractores / stats.total)) * 100;
     
     return Math.round(indice);
