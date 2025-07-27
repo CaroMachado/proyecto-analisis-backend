@@ -4,12 +4,31 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Generador de Informes de Satisfacción</title>
-    <!-- Ruta correcta -->
+    
+    <!-- La ruta al CSS es simple porque está en la misma carpeta 'public' -->
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <div class="container">
-        <!-- ... tu contenido ... -->
+        <header>
+            <h1>Generador de Informes de Satisfacción</h1>
+            <p>Sube el archivo Excel del fin de semana para generar el reporte.</p>
+        </header>
+
+        <!-- Este es el formulario. El ID "uploadForm" es crucial. -->
+        <form id="uploadForm" enctype="multipart/form-data">
+            <input type="file" id="archivoExcel" name="archivoExcel" accept=".xlsx, .xls" required>
+            <button type="submit">Procesar y Generar Informe</button>
+        </form>
+        
+        <div id="loader" class="loader" style="display: none;"></div>
+        <div id="error" class="error-message" style="display: none;"></div>
+
+        <button id="downloadPdf" style="display: none;">Descargar Informe en PDF</button>
+
+        <div id="reporte-container">
+            <!-- El contenido del informe se insertará aquí -->
+        </div>
     </div>
 
     <!-- Librerías externas -->
@@ -17,8 +36,10 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     
-    <!-- Scripts locales: rutas correctas -->
+    <!-- Scripts locales. El atributo 'defer' es VITAL. -->
+    <!-- Le dice al navegador que espere a cargar todo el HTML antes de ejecutar el script. -->
     <script src="wordcloud2.js" defer></script> 
     <script src="script.js" defer></script>
+    
 </body>
 </html>
