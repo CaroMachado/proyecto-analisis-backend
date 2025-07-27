@@ -1,5 +1,4 @@
-// server.js - VERSIÓN FINAL Y ROBUSTA Y FUNCIONAL EN PRODUCCIÓN
-
+// server.js - VERSIÓN FINAL CON CORS CORREGIDO Y ROBUSTO
 const express = require('express');
 const multer = require('multer');
 const ExcelJS = require('exceljs');
@@ -8,12 +7,9 @@ const cors = require('cors');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// ✅ Configurar CORS para permitir solicitudes desde tu frontend
-app.use(cors({
-    origin: 'https://devwebcm.com',
-    methods: ['POST'],
-    allowedHeaders: ['Content-Type']
-}));
+// ✅ CONFIGURACIÓN DE CORS AMPLIA Y ROBUSTA
+// Acepta peticiones de cualquier origen. Esto elimina el error de CORS.
+app.use(cors());
 
 // --- FUNCIONES AUXILIARES ---
 const STOPWORDS = ['de', 'la', 'que', 'el', 'en', 'y', 'a', 'los', 'del', 'se', 'las', 'por', 'un', 'para', 'con', 'no', 'una', 'su', 'al', 'lo', 'como', 'más', 'pero', 'sus', 'le', 'ya', 'o', 'este', 'ha', 'me', 'si', 'sin', 'sobre', 'muy', 'cuando', 'también', 'hasta', 'hay', 'donde', 'quien', 'desde', 'todo', 'nos', 'durante', 'uno', 'ni', 'contra', 'ese', 'eso', 'mi', 'qué', 'e', 'son', 'fue', 'gracias', 'hola', 'buen', 'dia', 'punto', 'puntos'];
