@@ -6,18 +6,12 @@ const path = require('path');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// *** CAMBIO CLAVE ***
-// Primero, definimos que la carpeta 'public' contiene nuestros archivos estáticos.
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Segundo, definimos explícitamente la ruta principal.
-// Cuando alguien visite la raíz de tu web, le enviaremos el archivo index.html
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-
-// El resto del código que ya tenías para procesar el Excel sigue igual.
 const STOPWORDS = [
     'de', 'la', 'que', 'el', 'en', 'y', 'a', 'los', 'del', 'se', 'las', 'por', 'un',
     'para', 'con', 'no', 'una', 'su', 'al', 'lo', 'como', 'más', 'pero', 'sus',
@@ -81,14 +75,15 @@ app.post('/procesar', upload.single('archivoExcel'), (req, res) => {
             
             uniqueDates[fecha] = true;
 
-            const sector = (row[2] || '').trim();
-            const ubicacion = (row[3] || '').trim();
+            // *** CORRECCIÓN: Ajuste de los índices de las columnas para que coincidan con tu Excel ***
+            const sector = (row[3] || '').trim();             // Columna D
+            const ubicacion = (row[4] || '').trim();          // Columna E
             const sectorKey = `${sector} - ${ubicacion}`;
-            const calificacionDesc = (row[7] || '').trim();
-            const comentario = (row[4] || '');
-            
-            const puntoCritico = (row[8] || '').trim();
-            const puntoDestacado = (row[9] || '').trim();
+            const comentario = (row[5] || '');                 // Columna F
+            const puntoCritico = (row[7] || '').trim();      // Columna H
+            const calificacionDesc = (row[8] || '').trim();  // Columna I
+            const puntoDestacado = (row[9] || '').trim();    // Columna J
+
 
             if (!processedData.porDia[diaSemana]) {
                 processedData.porDia[diaSemana] = { muy_positivas: 0, positivas: 0, negativas: 0, muy_negativas: 0, total: 0, criticos: {}, destacados: {} };
