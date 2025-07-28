@@ -1,4 +1,4 @@
-// server.js - VERSIÓN FINAL COMPLETA Y PROFESIONAL
+// server.js - VERSIÓN FINAL CORREGIDA Y PROFESIONAL
 const express = require('express');
 const multer = require('multer');
 const ExcelJS = require('exceljs');
@@ -33,7 +33,7 @@ function getWordsFromString(text) {
 
 function calculateSatisfaction(stats) {
     if (!stats || stats.total === 0) return 0;
-    const promotores = stats.muy_positivas || 0; 
+    const promotores = stats.muy_positivas || 0;
     const detractores = (stats.negativas || 0) + (stats.muy_negativas || 0);
     const indice = ((promotores / stats.total) - (detractores / stats.total)) * 100;
     return Math.round(indice);
@@ -60,17 +60,14 @@ function parseDateTime(fechaCell, horaCell) {
     } catch { return null; }
 }
 
-// --- ¡NUEVA FUNCIÓN DE IA MEJORADA! ---
 async function getAiOportunidades(sector, comentarios) {
     const fallbackMessage = "No hubo suficientes comentarios para generar oportunidades.";
     if (!comentarios || comentarios.length === 0) return fallbackMessage;
-    if (!process.env.HF_API_TOKEN) return "Análisis IA no disponible (Token no configurado).";
+    if (!process.env.HF_API_TOKEN) return "Análisis IA no disponible (Token de Hugging Face no configurado en el servidor).";
 
-    // ¡CAMBIO CLAVE! Usamos un modelo de IA conversacional y le damos una instrucción clara.
     const API_URL = "https://api-inference.huggingface.co/models/mistralai/Mixtral-8x7B-Instruct-v0.1";
     const comentariosTexto = comentarios.join('. ');
     
-    // ¡CAMBIO CLAVE! Este es el prompt que le da la inteligencia.
     const prompt = `Analiza los siguientes comentarios de clientes sobre el sector "${sector}" y extrae 2 oportunidades de mejora concretas y accionables. Responde solo con una lista numerada, de forma muy concisa. Comentarios: "${comentariosTexto}"`;
 
     try {
@@ -80,10 +77,14 @@ async function getAiOportunidades(sector, comentarios) {
         }, {
             headers: { 'Authorization': `Bearer ${process.env.HF_API_TOKEN}` }
         });
-        return response.data[0].generated_text.trim();
+        
+        if (response.data && response.data[0] && response.data[0].generated_text) {
+             return response.data[0].generated_text.trim();
+        }
+        return "La IA no devolvió una respuesta válida.";
     } catch (error) {
         console.error("Error en la API de IA:", error.response ? error.response.data : error.message);
-        return "Fallo en la conexión con la IA para generar oportunidades.";
+        return "Fallo en la conexión con la IA para generar oportunidades. Revisa la consola del servidor.";
     }
 }
 
@@ -126,7 +127,7 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
                 const jsDate = parseDateTime(row.getCell(columnMap['fecha']).value, row.getCell(columnMap['hora']).value);
                 if (!jsDate) return;
                 const diaSemana = DIAS_SEMANA[jsDate.getUTCDay()];
-                const fechaStr = jsDate.toLocaleDateString('es-AR', { day: '2-digit', timeZone: 'UTC' });
+                const fechaStr = jsDate.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' });
                 const hora = jsDate.getUTCHours();
                 const sector = String(row.getCell(columnMap['sector']).value || '').trim();
                 const ubicacion = String(row.getCell(columnMap['ubicacion']).value || '').trim();
@@ -140,8 +141,12 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
                 if (!processedData.porDia[diaSemana]) {
                     processedData.porDia[diaSemana] = { muy_positivas: 0, positivas: 0, negativas: 0, muy_negativas: 0, total: 0 };
                     dailyDetails[diaSemana] = { valoracionesPorHora: Array.from({ length: 24 }, () => ({ muy_positivas: 0, muy_negativas: 0, sectoresPositivos: {}, sectoresNegativos: {} })), sectores: {} };
-                    if (!processedData.fechas.includes(fechaStr)) processedData.fechas.push(fechaStr);
                 }
+                 // CAMBIO: Aseguramos que la fecha completa (con mes y año) se guarde para ordenar bien.
+                if (!processedData.fechas.includes(fechaStr)) {
+                    processedData.fechas.push(fechaStr);
+                }
+                
                 if (!processedData.porSector[sectorKey]) {
                     processedData.porSector[sectorKey] = { muy_positivas: 0, positivas: 0, negativas: 0, muy_negativas: 0, total: 0 };
                 }
@@ -164,6 +169,16 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
         });
 
         if (processedData.general.total === 0) return res.status(400).json({ success: false, message: 'El archivo no contiene filas con un formato válido.' });
+        
+        // --- CAMBIO CLAVE: Ordenar las fechas de menor a mayor ---
+        processedData.fechas.sort((a, b) => {
+            const [dayA, monthA, yearA] = a.split('/');
+            const [dayB, monthB, yearB] = b.split('/');
+            return new Date(`${yearA}-${monthA}-${dayA}`) - new Date(`${yearB}-${monthB}-${dayB}`);
+        });
+        // Formateamos solo el día para mostrarlo en el título
+        processedData.fechas = processedData.fechas.map(f => f.split('/')[0]);
+
 
         const getTopItems = (obj, count = 3) => Object.entries(obj).sort(([, a], [, b]) => b - a).slice(0, count).map(([name]) => name).join(', ');
 
