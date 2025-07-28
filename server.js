@@ -1,4 +1,4 @@
-// server.js - VERSIÓN FINAL, COMPLETA Y ROBUSTA CON REINTENTOS
+// server.js - VERSIÓN FINAL, COMPLETA Y CON MODELO DE IA ROBUSTO
 const express = require('express');
 const multer = require('multer');
 const ExcelJS = require('exceljs');
@@ -61,14 +61,17 @@ function parseDateTime(fechaCell, horaCell) {
     } catch { return null; }
 }
 
-// --- FUNCIÓN DE IA CON LÓGICA DE REINTENTOS ---
+// --- FUNCIÓN DE IA CON LÓGICA DE REINTENTOS Y MODELO "CLASE A" ---
 async function getAiOportunidades(sector, comentarios) {
     const fallbackMessage = "No hubo suficientes comentarios para generar oportunidades.";
     if (!comentarios || comentarios.length === 0) return fallbackMessage;
     if (!process.env.HF_API_TOKEN) return "Análisis IA no disponible (Token no configurado en Render).";
 
-    const API_URL = "https://api-inference.huggingface.co/models/OpenAssistant/oasst-sft-4-pythia-12b-epoch-3.5";
-    const prompt = `<|prompter|>Analiza los siguientes comentarios de clientes sobre el sector "${sector}" y genera una lista de 2 oportunidades de mejora, cortas y accionables. Comentarios: "${comentarios.join('. ')}"<|endoftext|><|assistant|>`;
+    // --- CAMBIO #1: Volvemos al modelo de alta calidad Mixtral ---
+    const API_URL = "https://api-inference.huggingface.co/models/mistralai/Mixtral-8x7B-Instruct-v0.1";
+    
+    // --- CAMBIO #2: Adaptamos el prompt al formato específico que requiere Mixtral ---
+    const prompt = `[INST] Analiza los siguientes comentarios de clientes sobre el sector "${sector}" y extrae 2 oportunidades de mejora concretas y accionables. Responde solo con una lista numerada, de forma muy concisa. Comentarios: "${comentarios.join('. ')}" [/INST]`;
     
     const headers = { 'Authorization': `Bearer ${process.env.HF_API_TOKEN}` };
     const data = {
@@ -77,14 +80,14 @@ async function getAiOportunidades(sector, comentarios) {
     };
 
     const MAX_RETRIES = 3;
-    const RETRY_DELAY = 15000;
+    const RETRY_DELAY = 20000; // Aumentamos la espera a 20 segundos por si el modelo está despertando
 
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-        console.log(`Intento ${attempt} de llamar a la API de IA para el sector "${sector}"...`);
+        console.log(`Intento ${attempt} de llamar a la API Mixtral para el sector "${sector}"...`);
         try {
             const response = await axios.post(API_URL, data, { 
                 headers: headers,
-                timeout: 30000 
+                timeout: 45000 // Aumentamos el timeout a 45 segundos
             });
             
             if (response.data && response.data[0] && response.data[0].generated_text) {
@@ -98,7 +101,7 @@ async function getAiOportunidades(sector, comentarios) {
                 console.log(`Esperando ${RETRY_DELAY / 1000} segundos para el siguiente intento...`);
                 await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
             } else {
-                return `La IA no pudo procesar la solicitud después de ${MAX_RETRIES} intentos.`;
+                return `La IA no pudo procesar la solicitud después de ${MAX_RETRIES} intentos. Error final: ${errorMessage}`;
             }
         }
     }
