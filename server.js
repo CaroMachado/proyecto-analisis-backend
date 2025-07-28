@@ -1,4 +1,4 @@
-// server.js - VERSIÓN FINAL, COMPLETA Y CON MODELO DE IA ROBUSTO
+// server.js - VERSIÓN DE DIAGNÓSTICO FINAL
 const express = require('express');
 const multer = require('multer');
 const ExcelJS = require('exceljs');
@@ -7,6 +7,13 @@ const axios = require('axios');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// LÍNEA DE DIAGNÓSTICO DEFINITIVO
+// Esta línea se imprimirá en los logs de Render tan pronto como el servidor arranque.
+console.log('--- DIAGNÓSTICO DE ARRANQUE DEL SERVIDOR ---');
+console.log('Verificando token de Hugging Face... ¿Existe?:', process.env.HF_API_TOKEN ? `Sí, cargado y empieza con "${process.env.HF_API_TOKEN.substring(0, 5)}..."` : '¡NO, ES NULO O INDEFINIDO!');
+console.log('-------------------------------------------');
+
 
 // --- CONFIGURACIÓN DE CORS ---
 const whitelist = ['https://devwebcm.com', 'http://localhost:5500', 'http://127.0.0.1:5500'];
@@ -65,12 +72,12 @@ function parseDateTime(fechaCell, horaCell) {
 async function getAiOportunidades(sector, comentarios) {
     const fallbackMessage = "No hubo suficientes comentarios para generar oportunidades.";
     if (!comentarios || comentarios.length === 0) return fallbackMessage;
-    if (!process.env.HF_API_TOKEN) return "Análisis IA no disponible (Token no configurado en Render).";
+    if (!process.env.HF_API_TOKEN) {
+        // Esta condición ahora es nuestra principal sospechosa.
+        return "Análisis IA no disponible (El token HF_API_TOKEN no está configurado en el servidor de Render).";
+    }
 
-    // --- CAMBIO #1: Volvemos al modelo de alta calidad Mixtral ---
     const API_URL = "https://api-inference.huggingface.co/models/mistralai/Mixtral-8x7B-Instruct-v0.1";
-    
-    // --- CAMBIO #2: Adaptamos el prompt al formato específico que requiere Mixtral ---
     const prompt = `[INST] Analiza los siguientes comentarios de clientes sobre el sector "${sector}" y extrae 2 oportunidades de mejora concretas y accionables. Responde solo con una lista numerada, de forma muy concisa. Comentarios: "${comentarios.join('. ')}" [/INST]`;
     
     const headers = { 'Authorization': `Bearer ${process.env.HF_API_TOKEN}` };
@@ -80,14 +87,14 @@ async function getAiOportunidades(sector, comentarios) {
     };
 
     const MAX_RETRIES = 3;
-    const RETRY_DELAY = 20000; // Aumentamos la espera a 20 segundos por si el modelo está despertando
+    const RETRY_DELAY = 20000;
 
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         console.log(`Intento ${attempt} de llamar a la API Mixtral para el sector "${sector}"...`);
         try {
             const response = await axios.post(API_URL, data, { 
                 headers: headers,
-                timeout: 45000 // Aumentamos el timeout a 45 segundos
+                timeout: 45000 
             });
             
             if (response.data && response.data[0] && response.data[0].generated_text) {
@@ -95,7 +102,7 @@ async function getAiOportunidades(sector, comentarios) {
                 return response.data[0].generated_text.trim();
             }
         } catch (error) {
-            const errorMessage = error.response ? error.response.data.error || JSON.stringify(error.response.data) : error.message;
+            const errorMessage = error.response ? `Status ${error.response.status}: ${JSON.stringify(error.response.data)}` : error.message;
             console.error(`Fallo en el intento ${attempt}:`, errorMessage);
             if (attempt < MAX_RETRIES) {
                 console.log(`Esperando ${RETRY_DELAY / 1000} segundos para el siguiente intento...`);
