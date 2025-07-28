@@ -1,4 +1,4 @@
-// server.js - VERSIÓN FINAL CON CORRECCIÓN DE CORS Y 502
+// server.js - VERSIÓN FINAL, COMPLETA Y ROBUSTA CON REINTENTOS
 const express = require('express');
 const multer = require('multer');
 const ExcelJS = require('exceljs');
@@ -8,30 +8,23 @@ const axios = require('axios');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// --- CONFIGURACIÓN DE CORS MEJORADA Y ROBUSTA ---
+// --- CONFIGURACIÓN DE CORS ---
 const whitelist = ['https://devwebcm.com', 'http://localhost:5500', 'http://127.0.0.1:5500'];
 const corsOptions = {
     origin: function (origin, callback) {
-        // Permitir peticiones sin 'origin' (como apps móviles o Postman) y las que están en la whitelist
         if (!origin || whitelist.indexOf(origin) !== -1) {
             callback(null, true);
         } else {
-            console.warn(`CORS: Origen bloqueado -> ${origin}`); // Log para depuración
-            callback(new Error('No permitido por la política de CORS'));
+            callback(new Error('No permitido por CORS'));
         }
     }
 };
 
-// --- CAMBIO CLAVE: MANEJO EXPLÍCITO DE SOLICITUDES PRE-VUELO (PREFLIGHT) ---
-// 1. Usa las opciones de CORS para todas las rutas
 app.use(cors(corsOptions));
-// 2. Habilita explícitamente la respuesta a las solicitudes OPTIONS que el navegador envía antes de un POST.
-//    Esto es fundamental para evitar el error 502.
 app.options('*', cors(corsOptions));
-
 app.use(express.json());
 
-// --- FUNCIONES AUXILIARES --- (Sin cambios)
+// --- FUNCIONES AUXILIARES ---
 const STOPWORDS = ['de', 'la', 'que', 'el', 'en', 'y', 'a', 'los', 'del', 'se', 'las', 'por', 'un', 'para', 'con', 'no', 'una', 'su', 'al', 'lo', 'como', 'más', 'pero', 'sus', 'le', 'ya', 'o', 'este', 'ha', 'me', 'si', 'sin', 'sobre', 'muy', 'cuando', 'también', 'hasta', 'hay', 'donde', 'quien', 'desde', 'todo', 'nos', 'durante', 'uno', 'ni', 'contra', 'ese', 'eso', 'mi', 'qué', 'e', 'son', 'fue', 'gracias', 'hola', 'buen', 'dia', 'punto', 'puntos'];
 
 function getWordsFromString(text) {
@@ -68,34 +61,48 @@ function parseDateTime(fechaCell, horaCell) {
     } catch { return null; }
 }
 
-// --- FUNCIÓN DE IA --- (Sin cambios)
+// --- FUNCIÓN DE IA CON LÓGICA DE REINTENTOS ---
 async function getAiOportunidades(sector, comentarios) {
     const fallbackMessage = "No hubo suficientes comentarios para generar oportunidades.";
     if (!comentarios || comentarios.length === 0) return fallbackMessage;
-    if (!process.env.HF_API_TOKEN) return "Análisis IA no disponible (Token no configurado).";
+    if (!process.env.HF_API_TOKEN) return "Análisis IA no disponible (Token no configurado en Render).";
 
     const API_URL = "https://api-inference.huggingface.co/models/OpenAssistant/oasst-sft-4-pythia-12b-epoch-3.5";
-    const comentariosTexto = comentarios.join('. ');
+    const prompt = `<|prompter|>Analiza los siguientes comentarios de clientes sobre el sector "${sector}" y genera una lista de 2 oportunidades de mejora, cortas y accionables. Comentarios: "${comentarios.join('. ')}"<|endoftext|><|assistant|>`;
     
-    const prompt = `<|prompter|>Analiza los siguientes comentarios de clientes sobre el sector "${sector}" y genera una lista de 2 oportunidades de mejora, cortas y accionables. Comentarios: "${comentariosTexto}"<|endoftext|><|assistant|>`;
+    const headers = { 'Authorization': `Bearer ${process.env.HF_API_TOKEN}` };
+    const data = {
+        inputs: prompt,
+        parameters: { max_new_tokens: 100, return_full_text: false, temperature: 0.7 }
+    };
 
-    try {
-        const response = await axios.post(API_URL, {
-            inputs: prompt,
-            parameters: { max_new_tokens: 100, return_full_text: false, temperature: 0.7 }
-        }, {
-            headers: { 'Authorization': `Bearer ${process.env.HF_API_TOKEN}` }
-        });
-        
-        if (response.data && response.data[0] && response.data[0].generated_text) {
-             return response.data[0].generated_text.trim();
+    const MAX_RETRIES = 3;
+    const RETRY_DELAY = 15000;
+
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        console.log(`Intento ${attempt} de llamar a la API de IA para el sector "${sector}"...`);
+        try {
+            const response = await axios.post(API_URL, data, { 
+                headers: headers,
+                timeout: 30000 
+            });
+            
+            if (response.data && response.data[0] && response.data[0].generated_text) {
+                console.log(`Éxito en el intento ${attempt}!`);
+                return response.data[0].generated_text.trim();
+            }
+        } catch (error) {
+            const errorMessage = error.response ? error.response.data.error || JSON.stringify(error.response.data) : error.message;
+            console.error(`Fallo en el intento ${attempt}:`, errorMessage);
+            if (attempt < MAX_RETRIES) {
+                console.log(`Esperando ${RETRY_DELAY / 1000} segundos para el siguiente intento...`);
+                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+            } else {
+                return `La IA no pudo procesar la solicitud después de ${MAX_RETRIES} intentos.`;
+            }
         }
-        return "La IA no devolvió una respuesta válida.";
-    } catch (error) {
-        console.error("Error en la API de IA:", error.response ? error.response.data : error.message);
-        const errorMessage = error.response ? JSON.stringify(error.response.data) : error.message;
-        return `Fallo en la conexión con la IA. Error: ${errorMessage}`;
     }
+    return "Fallo inesperado en la función de análisis de IA.";
 }
 
 const storage = multer.memoryStorage();
@@ -184,7 +191,6 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
             return new Date(`${yearA}-${monthA}-${dayA}`) - new Date(`${yearB}-${monthB}-${dayB}`);
         });
         processedData.fechas = processedData.fechas.map(f => f.split('/')[0]);
-
 
         const getTopItems = (obj, count = 3) => Object.entries(obj).sort(([, a], [, b]) => b - a).slice(0, count).map(([name]) => name).join(', ');
 
