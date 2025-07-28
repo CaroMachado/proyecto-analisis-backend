@@ -1,4 +1,4 @@
-// server.js - VERSIÓN DE DIAGNÓSTICO FINAL
+// server.js - VERSIÓN FINAL, COMPLETA Y ROBUSTA PARA RENDER
 const express = require('express');
 const multer = require('multer');
 const ExcelJS = require('exceljs');
@@ -8,14 +8,7 @@ const axios = require('axios');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// LÍNEA DE DIAGNÓSTICO DEFINITIVO
-// Esta línea se imprimirá en los logs de Render tan pronto como el servidor arranque.
-console.log('--- DIAGNÓSTICO DE ARRANQUE DEL SERVIDOR ---');
-console.log('Verificando token de Hugging Face... ¿Existe?:', process.env.HF_API_TOKEN ? `Sí, cargado y empieza con "${process.env.HF_API_TOKEN.substring(0, 5)}..."` : '¡NO, ES NULO O INDEFINIDO!');
-console.log('-------------------------------------------');
-
-
-// --- CONFIGURACIÓN DE CORS ---
+// --- CONFIGURACIÓN DE CORS ROBUSTA ---
 const whitelist = ['https://devwebcm.com', 'http://localhost:5500', 'http://127.0.0.1:5500'];
 const corsOptions = {
     origin: function (origin, callback) {
@@ -27,9 +20,27 @@ const corsOptions = {
     }
 };
 
+// Se aplican las opciones de CORS a todas las rutas y se responde a las solicitudes pre-vuelo.
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
+
+// Middleware para parsear JSON
 app.use(express.json());
+
+
+// --- RUTA DE SALUD (HEALTH CHECK) PARA ESTABILIDAD EN RENDER ---
+// Esta ruta responde rápidamente para decirle a Render que el servidor está vivo y evitar que se "duerma".
+app.get('/health', (req, res) => {
+    console.log("Recibida petición de Health Check. El servidor está vivo.");
+    res.status(200).send('OK');
+});
+
+
+// --- LÍNEA DE DIAGNÓSTICO DE ARRANQUE ---
+// Se imprime en los logs de Render una sola vez, cuando el servidor se inicia.
+console.log('--- DIAGNÓSTICO DE ARRANQUE DEL SERVIDOR ---');
+console.log('Verificando token de Hugging Face... ¿Existe?:', process.env.HF_API_TOKEN ? `Sí, cargado y empieza con "${process.env.HF_API_TOKEN.substring(0, 5)}..."` : '¡NO, ES NULO O INDEFINIDO!');
+console.log('-------------------------------------------');
 
 // --- FUNCIONES AUXILIARES ---
 const STOPWORDS = ['de', 'la', 'que', 'el', 'en', 'y', 'a', 'los', 'del', 'se', 'las', 'por', 'un', 'para', 'con', 'no', 'una', 'su', 'al', 'lo', 'como', 'más', 'pero', 'sus', 'le', 'ya', 'o', 'este', 'ha', 'me', 'si', 'sin', 'sobre', 'muy', 'cuando', 'también', 'hasta', 'hay', 'donde', 'quien', 'desde', 'todo', 'nos', 'durante', 'uno', 'ni', 'contra', 'ese', 'eso', 'mi', 'qué', 'e', 'son', 'fue', 'gracias', 'hola', 'buen', 'dia', 'punto', 'puntos'];
@@ -68,12 +79,11 @@ function parseDateTime(fechaCell, horaCell) {
     } catch { return null; }
 }
 
-// --- FUNCIÓN DE IA CON LÓGICA DE REINTENTOS Y MODELO "CLASE A" ---
+// --- FUNCIÓN DE IA CON LÓGICA DE REINTENTOS Y MODELO CORRECTO ---
 async function getAiOportunidades(sector, comentarios) {
     const fallbackMessage = "No hubo suficientes comentarios para generar oportunidades.";
     if (!comentarios || comentarios.length === 0) return fallbackMessage;
     if (!process.env.HF_API_TOKEN) {
-        // Esta condición ahora es nuestra principal sospechosa.
         return "Análisis IA no disponible (El token HF_API_TOKEN no está configurado en el servidor de Render).";
     }
 
@@ -118,6 +128,7 @@ async function getAiOportunidades(sector, comentarios) {
 const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
 
+// --- RUTA PRINCIPAL DE PROCESAMIENTO ---
 app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
     try {
         if (!req.file) return res.status(400).json({ success: false, message: 'No se subió ningún archivo.' });
