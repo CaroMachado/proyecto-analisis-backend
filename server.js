@@ -1,8 +1,8 @@
-// server.js - VERSIÓN FINAL CORREGIDA Y PROFESIONAL
+// server.js - VERSIÓN FINAL COMPLETA Y PROFESIONAL
 const express = require('express');
 const multer = require('multer');
 const ExcelJS = require('exceljs');
-const cors =require('cors');
+const cors = require('cors');
 const axios = require('axios');
 
 const app = express();
@@ -60,20 +60,23 @@ function parseDateTime(fechaCell, horaCell) {
     } catch { return null; }
 }
 
+// --- ¡NUEVA FUNCIÓN DE IA MEJORADA Y CORREGIDA! ---
 async function getAiOportunidades(sector, comentarios) {
     const fallbackMessage = "No hubo suficientes comentarios para generar oportunidades.";
     if (!comentarios || comentarios.length === 0) return fallbackMessage;
-    if (!process.env.HF_API_TOKEN) return "Análisis IA no disponible (Token de Hugging Face no configurado en el servidor).";
+    if (!process.env.HF_API_TOKEN) return "Análisis IA no disponible (Token no configurado).";
 
-    const API_URL = "https://api-inference.huggingface.co/models/mistralai/Mixtral-8x7B-Instruct-v0.1";
+    // --- CAMBIO CLAVE: USAMOS UN MODELO DIFERENTE Y MUY CONFIABLE ---
+    const API_URL = "https://api-inference.huggingface.co/models/OpenAssistant/oasst-sft-4-pythia-12b-epoch-3.5";
     const comentariosTexto = comentarios.join('. ');
     
-    const prompt = `Analiza los siguientes comentarios de clientes sobre el sector "${sector}" y extrae 2 oportunidades de mejora concretas y accionables. Responde solo con una lista numerada, de forma muy concisa. Comentarios: "${comentariosTexto}"`;
+    // --- CAMBIO CLAVE: El prompt se adapta al formato pregunta-respuesta del nuevo modelo ---
+    const prompt = `<|prompter|>Analiza los siguientes comentarios de clientes sobre el sector "${sector}" y genera una lista de 2 oportunidades de mejora, cortas y accionables. Comentarios: "${comentariosTexto}"<|endoftext|><|assistant|>`;
 
     try {
         const response = await axios.post(API_URL, {
             inputs: prompt,
-            parameters: { max_new_tokens: 100, return_full_text: false }
+            parameters: { max_new_tokens: 100, return_full_text: false, temperature: 0.7 }
         }, {
             headers: { 'Authorization': `Bearer ${process.env.HF_API_TOKEN}` }
         });
@@ -84,10 +87,10 @@ async function getAiOportunidades(sector, comentarios) {
         return "La IA no devolvió una respuesta válida.";
     } catch (error) {
         console.error("Error en la API de IA:", error.response ? error.response.data : error.message);
-        return "Fallo en la conexión con la IA para generar oportunidades. Revisa la consola del servidor.";
+        const errorMessage = error.response ? JSON.stringify(error.response.data) : error.message;
+        return `Fallo en la conexión con la IA. Error: ${errorMessage}`;
     }
 }
-
 
 const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
@@ -142,7 +145,6 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
                     processedData.porDia[diaSemana] = { muy_positivas: 0, positivas: 0, negativas: 0, muy_negativas: 0, total: 0 };
                     dailyDetails[diaSemana] = { valoracionesPorHora: Array.from({ length: 24 }, () => ({ muy_positivas: 0, muy_negativas: 0, sectoresPositivos: {}, sectoresNegativos: {} })), sectores: {} };
                 }
-                 // CAMBIO: Aseguramos que la fecha completa (con mes y año) se guarde para ordenar bien.
                 if (!processedData.fechas.includes(fechaStr)) {
                     processedData.fechas.push(fechaStr);
                 }
@@ -170,13 +172,11 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
 
         if (processedData.general.total === 0) return res.status(400).json({ success: false, message: 'El archivo no contiene filas con un formato válido.' });
         
-        // --- CAMBIO CLAVE: Ordenar las fechas de menor a mayor ---
         processedData.fechas.sort((a, b) => {
             const [dayA, monthA, yearA] = a.split('/');
             const [dayB, monthB, yearB] = b.split('/');
             return new Date(`${yearA}-${monthA}-${dayA}`) - new Date(`${yearB}-${monthB}-${dayB}`);
         });
-        // Formateamos solo el día para mostrarlo en el título
         processedData.fechas = processedData.fechas.map(f => f.split('/')[0]);
 
 
