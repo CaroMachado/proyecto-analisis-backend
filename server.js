@@ -1,4 +1,4 @@
-// server.js - VERSIÓN FINAL Y COMPLETA CON TODAS LAS CORRECCIONES
+// server.js - VERSIÓN DE DIAGNÓSTICO FINAL CON TOKEN HARDCODEADO
 const express = require('express');
 const multer = require('multer');
 const ExcelJS = require('exceljs');
@@ -7,6 +7,11 @@ const axios = require('axios');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// --- PRUEBA DE DIAGNÓSTICO: TOKEN HARDCODEADO ---
+// ¡¡¡ ESTO ES SOLO PARA DEPURACIÓN !!!
+// Reemplaza el texto de abajo con tu token real de Hugging Face.
+const HUGGING_FACE_TOKEN = "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"; // <--- REEMPLAZA ESTO CON TU TOKEN
 
 // --- CONFIGURACIÓN DE CORS ---
 const whitelist = ['https://devwebcm.com', 'http://localhost:5500', 'http://127.0.0.1:5500'];
@@ -24,12 +29,11 @@ app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 app.use(express.json());
 
-// --- RUTA DE SALUD (HEALTH CHECK) PARA ESTABILIDAD EN RENDER ---
 app.get('/health', (req, res) => {
     res.status(200).send('OK');
 });
 
-// --- FUNCIONES AUXILIARES ---
+// --- FUNCIONES AUXILIARES (Sin cambios) ---
 const STOPWORDS = ['de', 'la', 'que', 'el', 'en', 'y', 'a', 'los', 'del', 'se', 'las', 'por', 'un', 'para', 'con', 'no', 'una', 'su', 'al', 'lo', 'como', 'más', 'pero', 'sus', 'le', 'ya', 'o', 'este', 'ha', 'me', 'si', 'sin', 'sobre', 'muy', 'cuando', 'también', 'hasta', 'hay', 'donde', 'quien', 'desde', 'todo', 'nos', 'durante', 'uno', 'ni', 'contra', 'ese', 'eso', 'mi', 'qué', 'e', 'son', 'fue', 'gracias', 'hola', 'buen', 'dia', 'punto', 'puntos'];
 
 function getWordsFromString(text) {
@@ -66,49 +70,45 @@ function parseDateTime(fechaCell, horaCell) {
     } catch { return null; }
 }
 
-// CORRECCIÓN: FUNCIÓN DE IA FIABLE CON LÓGICA DE REINTENTOS
+
+// --- FUNCIÓN DE IA USANDO EL TOKEN HARDCODEADO ---
 async function encontrarComentarioMasCritico(comentarios) {
     const fallbackMessage = "No se encontraron comentarios negativos específicos para analizar.";
     if (!comentarios || comentarios.length === 0) return fallbackMessage;
-    if (!process.env.HF_API_TOKEN) return "Análisis no disponible (Token no configurado).";
+    if (!HUGGING_FACE_TOKEN) return "Análisis no disponible (Token no proporcionado en el código).";
 
     const API_URL = "https://api-inference.huggingface.co/models/pysentimiento/robertuito-sentiment-analysis";
-    const headers = { 'Authorization': `Bearer ${process.env.HF_API_TOKEN}` };
+    const headers = { 'Authorization': `Bearer ${HUGGING_FACE_TOKEN}` }; // Usa el token del código
 
-    for (let attempt = 1; attempt <= 3; attempt++) {
-        try {
-            const response = await axios.post(API_URL, { inputs: comentarios }, { headers, timeout: 20000 });
-            const resultados = response.data;
-            let comentarioMasNegativo = "";
-            let puntuacionMasAlta = -1;
+    try {
+        const response = await axios.post(API_URL, { inputs: comentarios }, { headers, timeout: 20000 });
+        const resultados = response.data;
+        let comentarioMasNegativo = "";
+        let puntuacionMasAlta = -1;
 
-            if (!Array.isArray(resultados)) { // Manejo de error si la respuesta no es un array
-                console.error(`Intento ${attempt} de análisis de sentimiento devolvió un formato inesperado:`, resultados);
-                throw new Error("Formato de respuesta de IA inesperado");
-            }
-            
-            for (let i = 0; i < resultados.length; i++) {
-                const sentimiento = resultados[i];
-                let negScore = 0;
-                for(const s of sentimiento){
-                    if(s.label === 'NEG'){
-                        negScore = s.score;
-                        break;
-                    }
-                }
-                if (negScore > puntuacionMasAlta) {
-                    puntuacionMasAlta = negScore;
-                    comentarioMasNegativo = comentarios[i];
-                }
-            }
-            return comentarioMasNegativo ? `<strong>Comentario más crítico detectado:</strong><br>"<em>${comentarioMasNegativo}</em>"` : fallbackMessage;
-        } catch (error) {
-            console.error(`Intento ${attempt} de análisis de sentimiento fallido:`, error.response ? error.response.data : error.message);
-            if (attempt === 3) {
-                return "Fallo el servicio de análisis de comentarios.";
-            }
-            await new Promise(resolve => setTimeout(resolve, 5000)); // Espera 5 segundos antes de reintentar
+        if (!Array.isArray(resultados)) {
+            console.error("Formato de respuesta de IA inesperado:", resultados);
+            throw new Error("Formato de respuesta de IA inesperado");
         }
+            
+        for (let i = 0; i < resultados.length; i++) {
+            const sentimiento = resultados[i];
+            let negScore = 0;
+            for(const s of sentimiento){
+                if(s.label === 'NEG'){
+                    negScore = s.score;
+                    break;
+                }
+            }
+            if (negScore > puntuacionMasAlta) {
+                puntuacionMasAlta = negScore;
+                comentarioMasNegativo = comentarios[i];
+            }
+        }
+        return comentarioMasNegativo ? `<strong>Comentario más crítico detectado:</strong><br>"<em>${comentarioMasNegativo}</em>"` : fallbackMessage;
+    } catch (error) {
+        console.error("Error en el análisis de sentimiento (con token hardcodeado):", error.response ? error.response.data : error.message);
+        return "Fallo el servicio de análisis de comentarios.";
     }
 }
 
