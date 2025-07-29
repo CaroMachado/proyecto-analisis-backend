@@ -91,7 +91,7 @@ function analizarComentarioMasCritico(comentarios) {
 
 // --- FUNCIÓN DE NUBE DE PALABRAS 100% FIABLE CON CANVAS Y D3-CLOUD ---
 function generarNubeComoImagen(wordList, colorPalette) {
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
         if (!wordList || wordList.length === 0) {
             return resolve(null);
         }
