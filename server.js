@@ -1,4 +1,4 @@
-// server.js - VERSIÓN FINAL, COMPLETA Y ROBUSTA PARA RENDER
+// server.js - VERSIÓN FINAL Y COMPLETA CON CORRECCIÓN DE DATOS DIARIOS
 const express = require('express');
 const multer = require('multer');
 const ExcelJS = require('exceljs');
@@ -8,7 +8,7 @@ const axios = require('axios');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// --- CONFIGURACIÓN DE CORS ROBUSTA ---
+// --- CONFIGURACIÓN DE CORS ---
 const whitelist = ['https://devwebcm.com', 'http://localhost:5500', 'http://127.0.0.1:5500'];
 const corsOptions = {
     origin: function (origin, callback) {
@@ -20,27 +20,14 @@ const corsOptions = {
     }
 };
 
-// Se aplican las opciones de CORS a todas las rutas y se responde a las solicitudes pre-vuelo.
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
-
-// Middleware para parsear JSON
 app.use(express.json());
 
-
 // --- RUTA DE SALUD (HEALTH CHECK) PARA ESTABILIDAD EN RENDER ---
-// Esta ruta responde rápidamente para decirle a Render que el servidor está vivo y evitar que se "duerma".
 app.get('/health', (req, res) => {
-    console.log("Recibida petición de Health Check. El servidor está vivo.");
     res.status(200).send('OK');
 });
-
-
-// --- LÍNEA DE DIAGNÓSTICO DE ARRANQUE ---
-// Se imprime en los logs de Render una sola vez, cuando el servidor se inicia.
-console.log('--- DIAGNÓSTICO DE ARRANQUE DEL SERVIDOR ---');
-console.log('Verificando token de Hugging Face... ¿Existe?:', process.env.HF_API_TOKEN ? `Sí, cargado y empieza con "${process.env.HF_API_TOKEN.substring(0, 5)}..."` : '¡NO, ES NULO O INDEFINIDO!');
-console.log('-------------------------------------------');
 
 // --- FUNCIONES AUXILIARES ---
 const STOPWORDS = ['de', 'la', 'que', 'el', 'en', 'y', 'a', 'los', 'del', 'se', 'las', 'por', 'un', 'para', 'con', 'no', 'una', 'su', 'al', 'lo', 'como', 'más', 'pero', 'sus', 'le', 'ya', 'o', 'este', 'ha', 'me', 'si', 'sin', 'sobre', 'muy', 'cuando', 'también', 'hasta', 'hay', 'donde', 'quien', 'desde', 'todo', 'nos', 'durante', 'uno', 'ni', 'contra', 'ese', 'eso', 'mi', 'qué', 'e', 'son', 'fue', 'gracias', 'hola', 'buen', 'dia', 'punto', 'puntos'];
@@ -79,56 +66,52 @@ function parseDateTime(fechaCell, horaCell) {
     } catch { return null; }
 }
 
-// --- FUNCIÓN DE IA CON LÓGICA DE REINTENTOS Y MODELO CORRECTO ---
-async function getAiOportunidades(sector, comentarios) {
-    const fallbackMessage = "No hubo suficientes comentarios para generar oportunidades.";
+// --- FUNCIÓN DE IA FIABLE: ANÁLISIS DE SENTIMIENTO ---
+async function encontrarComentarioMasCritico(comentarios) {
+    const fallbackMessage = "No se encontraron comentarios negativos específicos para analizar.";
     if (!comentarios || comentarios.length === 0) return fallbackMessage;
-    if (!process.env.HF_API_TOKEN) {
-        return "Análisis IA no disponible (El token HF_API_TOKEN no está configurado en el servidor de Render).";
-    }
+    if (!process.env.HF_API_TOKEN) return "Análisis no disponible (Token no configurado).";
 
-    const API_URL = "https://api-inference.huggingface.co/models/mistralai/Mixtral-8x7B-Instruct-v0.1";
-    const prompt = `[INST] Analiza los siguientes comentarios de clientes sobre el sector "${sector}" y extrae 2 oportunidades de mejora concretas y accionables. Responde solo con una lista numerada, de forma muy concisa. Comentarios: "${comentarios.join('. ')}" [/INST]`;
-    
+    const API_URL = "https://api-inference.huggingface.co/models/pysentimiento/robertuito-sentiment-analysis";
     const headers = { 'Authorization': `Bearer ${process.env.HF_API_TOKEN}` };
-    const data = {
-        inputs: prompt,
-        parameters: { max_new_tokens: 100, return_full_text: false, temperature: 0.7 }
-    };
 
-    const MAX_RETRIES = 3;
-    const RETRY_DELAY = 20000;
+    let comentarioMasNegativo = "";
+    let puntuacionMasAlta = -1;
 
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-        console.log(`Intento ${attempt} de llamar a la API Mixtral para el sector "${sector}"...`);
-        try {
-            const response = await axios.post(API_URL, data, { 
-                headers: headers,
-                timeout: 45000 
-            });
-            
-            if (response.data && response.data[0] && response.data[0].generated_text) {
-                console.log(`Éxito en el intento ${attempt}!`);
-                return response.data[0].generated_text.trim();
+    try {
+        const response = await axios.post(API_URL, { inputs: comentarios }, { headers });
+        const resultados = response.data;
+
+        for (let i = 0; i < resultados.length; i++) {
+            const sentimiento = resultados[i];
+            let negScore = 0;
+            for(const s of sentimiento){
+                if(s.label === 'NEG'){
+                    negScore = s.score;
+                    break;
+                }
             }
-        } catch (error) {
-            const errorMessage = error.response ? `Status ${error.response.status}: ${JSON.stringify(error.response.data)}` : error.message;
-            console.error(`Fallo en el intento ${attempt}:`, errorMessage);
-            if (attempt < MAX_RETRIES) {
-                console.log(`Esperando ${RETRY_DELAY / 1000} segundos para el siguiente intento...`);
-                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
-            } else {
-                return `La IA no pudo procesar la solicitud después de ${MAX_RETRIES} intentos. Error final: ${errorMessage}`;
+            if (negScore > puntuacionMasAlta) {
+                puntuacionMasAlta = negScore;
+                comentarioMasNegativo = comentarios[i];
             }
         }
+
+        if (comentarioMasNegativo) {
+            return `<strong>Comentario más crítico detectado:</strong><br>"<em>${comentarioMasNegativo}</em>"`;
+        } else {
+            return fallbackMessage;
+        }
+
+    } catch (error) {
+        console.error("Error en el análisis de sentimiento:", error.response ? error.response.data : error.message);
+        return "Fallo el servicio de análisis de comentarios.";
     }
-    return "Fallo inesperado en la función de análisis de IA.";
 }
 
 const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
 
-// --- RUTA PRINCIPAL DE PROCESAMIENTO ---
 app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
     try {
         if (!req.file) return res.status(400).json({ success: false, message: 'No se subió ningún archivo.' });
@@ -171,12 +154,12 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
                 const sectorKey = sector && ubicacion ? `${sector} - ${ubicacion}` : (sector || ubicacion);
                 if (!sectorKey) return;
                 const calificacionDesc = String(row.getCell(columnMap['calificacion_descripcion']).value || '').trim();
-                const comentario = String(row.getCell(columnMap['comentarios'])?.value || '');
+                const comentario = String(row.getCell(columnMap['comentarios'])?.value || '').trim();
                 const puntoCritico = String(row.getCell(columnMap['puntos_criticos'])?.value || '').trim();
                 const puntoDestacado = String(row.getCell(columnMap['destacados'])?.value || '').trim();
 
                 if (!processedData.porDia[diaSemana]) {
-                    processedData.porDia[diaSemana] = { muy_positivas: 0, positivas: 0, negativas: 0, muy_negativas: 0, total: 0 };
+                    processedData.porDia[diaSemana] = { muy_positivas: 0, positivas: 0, negativas: 0, muy_negativas: 0, total: 0, sectoresDelDia: [] }; // CORRECCIÓN: Inicializar sectoresDelDia
                     dailyDetails[diaSemana] = { valoracionesPorHora: Array.from({ length: 24 }, () => ({ muy_positivas: 0, muy_negativas: 0, sectoresPositivos: {}, sectoresNegativos: {} })), sectores: {} };
                 }
                 if (!processedData.fechas.includes(fechaStr)) {
@@ -190,22 +173,50 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
                     dailyDetails[diaSemana].sectores[sectorKey] = { muy_positivas: 0, positivas: 0, negativas: 0, muy_negativas: 0, total: 0, criticos: {}, destacados: {}, comentarios: [] };
                 }
 
-                processedData.general.total++; processedData.porDia[diaSemana].total++; processedData.porHora[hora].total++; processedData.porSector[sectorKey].total++; dailyDetails[diaSemana].sectores[sectorKey].total++;
+                processedData.general.total++;
+                processedData.porDia[diaSemana].total++;
+                processedData.porHora[hora].total++;
+                processedData.porSector[sectorKey].total++;
+                dailyDetails[diaSemana].sectores[sectorKey].total++;
                 if (puntoCritico) dailyDetails[diaSemana].sectores[sectorKey].criticos[puntoCritico] = (dailyDetails[diaSemana].sectores[sectorKey].criticos[puntoCritico] || 0) + 1;
                 if (puntoDestacado) dailyDetails[diaSemana].sectores[sectorKey].destacados[puntoDestacado] = (dailyDetails[diaSemana].sectores[sectorKey].destacados[puntoDestacado] || 0) + 1;
                 if (comentario) dailyDetails[diaSemana].sectores[sectorKey].comentarios.push(comentario);
 
                 switch (calificacionDesc) {
-                    case 'Muy Positiva': processedData.general.muy_positivas++; processedData.porDia[diaSemana].muy_positivas++; processedData.porHora[hora].muy_positivas++; processedData.porSector[sectorKey].muy_positivas++; dailyDetails[diaSemana].sectores[sectorKey].muy_positivas++; dailyDetails[diaSemana].valoracionesPorHora[hora].muy_positivas++; dailyDetails[diaSemana].valoracionesPorHora[hora].sectoresPositivos[sectorKey] = (dailyDetails[diaSemana].valoracionesPorHora[hora].sectoresPositivos[sectorKey] || 0) + 1; if (comentario) processedData.nubes.positiva.push(...getWordsFromString(comentario)); break;
-                    case 'Positiva': processedData.general.positivas++; processedData.porDia[diaSemana].positivas++; processedData.porHora[hora].positivas++; processedData.porSector[sectorKey].positivas++; dailyDetails[diaSemana].sectores[sectorKey].positivas++; if (comentario) processedData.nubes.positiva.push(...getWordsFromString(comentario)); break;
-                    case 'Negativa': processedData.general.negativas++; processedData.porDia[diaSemana].negativas++; processedData.porHora[hora].negativas++; processedData.porSector[sectorKey].negativas++; dailyDetails[diaSemana].sectores[sectorKey].negativas++; if (comentario) processedData.nubes.negativa.push(...getWordsFromString(comentario)); break;
-                    case 'Muy Negativa': processedData.general.muy_negativas++; processedData.porDia[diaSemana].muy_negativas++; processedData.porHora[hora].muy_negativas++; processedData.porSector[sectorKey].muy_negativas++; dailyDetails[diaSemana].sectores[sectorKey].muy_negativas++; dailyDetails[diaSemana].valoracionesPorHora[hora].muy_negativas++; dailyDetails[diaSemana].valoracionesPorHora[hora].sectoresNegativos[sectorKey] = (dailyDetails[diaSemana].valoracionesPorHora[hora].sectoresNegativos[sectorKey] || 0) + 1; if (comentario) processedData.nubes.negativa.push(...getWordsFromString(comentario)); break;
+                    case 'Muy Positiva':
+                        processedData.general.muy_positivas++; processedData.porDia[diaSemana].muy_positivas++; processedData.porHora[hora].muy_positivas++; processedData.porSector[sectorKey].muy_positivas++; dailyDetails[diaSemana].sectores[sectorKey].muy_positivas++;
+                        if (comentario) processedData.nubes.positiva.push(...getWordsFromString(comentario)); break;
+                    case 'Positiva':
+                        processedData.general.positivas++; processedData.porDia[diaSemana].positivas++; processedData.porHora[hora].positivas++; processedData.porSector[sectorKey].positivas++; dailyDetails[diaSemana].sectores[sectorKey].positivas++;
+                        if (comentario) processedData.nubes.positiva.push(...getWordsFromString(comentario)); break;
+                    case 'Negativa':
+                        processedData.general.negativas++; processedData.porDia[diaSemana].negativas++; processedData.porHora[hora].negativas++; processedData.porSector[sectorKey].negativas++; dailyDetails[diaSemana].sectores[sectorKey].negativas++;
+                        if (comentario) processedData.nubes.negativa.push(...getWordsFromString(comentario)); break;
+                    case 'Muy Negativa':
+                        processedData.general.muy_negativas++; processedData.porDia[diaSemana].muy_negativas++; processedData.porHora[hora].muy_negativas++; processedData.porSector[sectorKey].muy_negativas++; dailyDetails[diaSemana].sectores[sectorKey].muy_negativas++;
+                        if (comentario) processedData.nubes.negativa.push(...getWordsFromString(comentario)); break;
                 }
             } catch (e) { console.warn(`Se ignoró la fila ${rowNumber} por un error de formato.`); }
         });
 
         if (processedData.general.total === 0) return res.status(400).json({ success: false, message: 'El archivo no contiene filas con un formato válido.' });
         
+        // CORRECCIÓN: Lógica para procesar los datos de sectores por día
+        for (const dia of Object.keys(dailyDetails)) {
+            const detallesSectoresDia = dailyDetails[dia].sectores;
+            const sectoresCalculados = [];
+            for (const nombreSector in detallesSectoresDia) {
+                const statsSector = detallesSectoresDia[nombreSector];
+                if (statsSector.total > 0) {
+                    statsSector.satisfaccion = calculateSatisfaction(statsSector);
+                    sectoresCalculados.push({ nombre: nombreSector, stats: statsSector });
+                }
+            }
+            if (processedData.porDia[dia]) {
+                processedData.porDia[dia].sectoresDelDia = sectoresCalculados;
+            }
+        }
+
         processedData.fechas.sort((a, b) => {
             const [dayA, monthA, yearA] = a.split('/');
             const [dayB, monthB, yearB] = b.split('/');
@@ -216,22 +227,27 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
         const getTopItems = (obj, count = 3) => Object.entries(obj).sort(([, a], [, b]) => b - a).slice(0, count).map(([name]) => name).join(', ');
 
         for (const dia in processedData.porDia) {
-            const detallesDia = dailyDetails[dia];
-            const picoPositivo = detallesDia.valoracionesPorHora.reduce((p, c, i) => c.muy_positivas > p.count ? { hora: i, count: c.muy_positivas } : p, { hora: -1, count: -1 });
             let sectorMasCritico = { nombre: 'N/A', satisfaccion: 101, criticos: 'N/A', total: 0, comentarios: [] };
             
-            Object.entries(detallesDia.sectores).forEach(([nombreSector, statsSector]) => {
-                if (statsSector.total < 3) return;
-                const satisfaccionSector = calculateSatisfaction(statsSector);
-                if (satisfaccionSector < sectorMasCritico.satisfaccion) {
-                    sectorMasCritico = { nombre: nombreSector, satisfaccion: satisfaccionSector, criticos: getTopItems(statsSector.criticos, 3) || 'comentarios generales', total: statsSector.total, comentarios: statsSector.comentarios.filter(c => c.length > 10) };
-                }
-            });
+            // Usamos la nueva data diaria para encontrar el sector más crítico del día
+            if (processedData.porDia[dia].sectoresDelDia) {
+                 processedData.porDia[dia].sectoresDelDia.forEach(({ nombre, stats }) => {
+                    if (stats.total < 3) return;
+                    if (stats.satisfaccion < sectorMasCritico.satisfaccion) {
+                        sectorMasCritico = {
+                            nombre: nombre,
+                            satisfaccion: stats.satisfaccion,
+                            criticos: getTopItems(stats.criticos, 3) || 'comentarios generales',
+                            total: stats.total,
+                            comentarios: stats.comentarios.filter(c => c.length > 10)
+                        };
+                    }
+                });
+            }
 
-            const conclusionIA = await getAiOportunidades(sectorMasCritico.nombre, sectorMasCritico.comentarios);
+            const conclusionIA = await encontrarComentarioMasCritico(sectorMasCritico.comentarios);
 
             processedData.porDia[dia].analisis = {
-                picoPositivo: { hora: picoPositivo.hora, count: picoPositivo.count, sectores: picoPositivo.hora !== -1 ? getTopItems(detallesDia.valoracionesPorHora[picoPositivo.hora].sectoresPositivos) : 'N/A' },
                 sectorCritico: sectorMasCritico,
                 conclusionIA: conclusionIA
             };
