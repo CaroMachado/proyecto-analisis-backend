@@ -1,4 +1,4 @@
-// server.js - VERSIÓN FINAL CON CORRECCIÓN DEFINITIVA DE UPLOAD
+// server.js - VERSIÓN FINAL CON MANEJO DE ERRORES ROBUSTO
 const express = require('express');
 const multer = require('multer');
 const ExcelJS = require('exceljs');
@@ -97,7 +97,6 @@ function generarNubeComoImagen(wordList, colorPalette) {
         const width = 800;
         const height = 600;
         const maxFreq = Math.max(...wordList.map(item => item[1]), 1);
-
         const layout = d3Cloud()
             .size([width, height])
             .words(wordList.map(d => ({ text: d[0], size: d[1] })))
@@ -128,11 +127,9 @@ function generarNubeComoImagen(wordList, colorPalette) {
     });
 }
 
-// Configuración de Multer para recibir el archivo
 const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
 
-// CORRECCIÓN DEFINITIVA: AÑADIR EL MIDDLEWARE DE MULTER AQUÍ
 app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
     try {
         if (!req.file) {
@@ -294,8 +291,20 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
         const greenPalette = { strong: '#1a7431', light: '#28a745' };
         const redPalette = { strong: '#b32230', light: '#dc3545' };
 
-        const nubePositivaB64 = await generarNubeComoImagen(positiveList, greenPalette);
-        const nubeNegativaB64 = await generarNubeComoImagen(negativeList, redPalette);
+        let nubePositivaB64 = null;
+        let nubeNegativaB64 = null;
+
+        // --- BLOQUE DE SEGURIDAD PARA LA NUBE DE PALABRAS ---
+        try {
+            nubePositivaB64 = await generarNubeComoImagen(positiveList, greenPalette);
+        } catch (err) {
+            console.error("ERROR CRÍTICO AL GENERAR NUBE POSITIVA:", err);
+        }
+        try {
+            nubeNegativaB64 = await generarNubeComoImagen(negativeList, redPalette);
+        } catch (err) {
+            console.error("ERROR CRÍTICO AL GENERAR NUBE NEGATIVA:", err);
+        }
         
         processedData.nubes = {
             positiva_b64: nubePositivaB64,
