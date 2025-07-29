@@ -1,4 +1,4 @@
-// server.js - VERSIÓN FINAL Y COMPLETA CON CORRECCIÓN DE DATOS DIARIOS
+// server.js - VERSIÓN FINAL Y COMPLETA CON TODAS LAS CORRECCIONES
 const express = require('express');
 const multer = require('multer');
 const ExcelJS = require('exceljs');
@@ -66,7 +66,7 @@ function parseDateTime(fechaCell, horaCell) {
     } catch { return null; }
 }
 
-// --- FUNCIÓN DE IA FIABLE: ANÁLISIS DE SENTIMIENTO ---
+// CORRECCIÓN: FUNCIÓN DE IA FIABLE CON LÓGICA DE REINTENTOS
 async function encontrarComentarioMasCritico(comentarios) {
     const fallbackMessage = "No se encontraron comentarios negativos específicos para analizar.";
     if (!comentarios || comentarios.length === 0) return fallbackMessage;
@@ -75,39 +75,43 @@ async function encontrarComentarioMasCritico(comentarios) {
     const API_URL = "https://api-inference.huggingface.co/models/pysentimiento/robertuito-sentiment-analysis";
     const headers = { 'Authorization': `Bearer ${process.env.HF_API_TOKEN}` };
 
-    let comentarioMasNegativo = "";
-    let puntuacionMasAlta = -1;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+            const response = await axios.post(API_URL, { inputs: comentarios }, { headers, timeout: 20000 });
+            const resultados = response.data;
+            let comentarioMasNegativo = "";
+            let puntuacionMasAlta = -1;
 
-    try {
-        const response = await axios.post(API_URL, { inputs: comentarios }, { headers });
-        const resultados = response.data;
-
-        for (let i = 0; i < resultados.length; i++) {
-            const sentimiento = resultados[i];
-            let negScore = 0;
-            for(const s of sentimiento){
-                if(s.label === 'NEG'){
-                    negScore = s.score;
-                    break;
+            if (!Array.isArray(resultados)) { // Manejo de error si la respuesta no es un array
+                console.error(`Intento ${attempt} de análisis de sentimiento devolvió un formato inesperado:`, resultados);
+                throw new Error("Formato de respuesta de IA inesperado");
+            }
+            
+            for (let i = 0; i < resultados.length; i++) {
+                const sentimiento = resultados[i];
+                let negScore = 0;
+                for(const s of sentimiento){
+                    if(s.label === 'NEG'){
+                        negScore = s.score;
+                        break;
+                    }
+                }
+                if (negScore > puntuacionMasAlta) {
+                    puntuacionMasAlta = negScore;
+                    comentarioMasNegativo = comentarios[i];
                 }
             }
-            if (negScore > puntuacionMasAlta) {
-                puntuacionMasAlta = negScore;
-                comentarioMasNegativo = comentarios[i];
+            return comentarioMasNegativo ? `<strong>Comentario más crítico detectado:</strong><br>"<em>${comentarioMasNegativo}</em>"` : fallbackMessage;
+        } catch (error) {
+            console.error(`Intento ${attempt} de análisis de sentimiento fallido:`, error.response ? error.response.data : error.message);
+            if (attempt === 3) {
+                return "Fallo el servicio de análisis de comentarios.";
             }
+            await new Promise(resolve => setTimeout(resolve, 5000)); // Espera 5 segundos antes de reintentar
         }
-
-        if (comentarioMasNegativo) {
-            return `<strong>Comentario más crítico detectado:</strong><br>"<em>${comentarioMasNegativo}</em>"`;
-        } else {
-            return fallbackMessage;
-        }
-
-    } catch (error) {
-        console.error("Error en el análisis de sentimiento:", error.response ? error.response.data : error.message);
-        return "Fallo el servicio de análisis de comentarios.";
     }
 }
+
 
 const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
@@ -159,8 +163,8 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
                 const puntoDestacado = String(row.getCell(columnMap['destacados'])?.value || '').trim();
 
                 if (!processedData.porDia[diaSemana]) {
-                    processedData.porDia[diaSemana] = { muy_positivas: 0, positivas: 0, negativas: 0, muy_negativas: 0, total: 0, sectoresDelDia: [] }; // CORRECCIÓN: Inicializar sectoresDelDia
-                    dailyDetails[diaSemana] = { valoracionesPorHora: Array.from({ length: 24 }, () => ({ muy_positivas: 0, muy_negativas: 0, sectoresPositivos: {}, sectoresNegativos: {} })), sectores: {} };
+                    processedData.porDia[diaSemana] = { muy_positivas: 0, positivas: 0, negativas: 0, muy_negativas: 0, total: 0, sectoresDelDia: [] };
+                    dailyDetails[diaSemana] = { valoracionesPorHora: Array.from({ length: 24 }, () => ({ muy_positivas: 0, sectoresPositivos: {} })), sectores: {} };
                 }
                 if (!processedData.fechas.includes(fechaStr)) {
                     processedData.fechas.push(fechaStr);
@@ -185,6 +189,8 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
                 switch (calificacionDesc) {
                     case 'Muy Positiva':
                         processedData.general.muy_positivas++; processedData.porDia[diaSemana].muy_positivas++; processedData.porHora[hora].muy_positivas++; processedData.porSector[sectorKey].muy_positivas++; dailyDetails[diaSemana].sectores[sectorKey].muy_positivas++;
+                        dailyDetails[diaSemana].valoracionesPorHora[hora].muy_positivas++;
+                        dailyDetails[diaSemana].valoracionesPorHora[hora].sectoresPositivos[sectorKey] = (dailyDetails[diaSemana].valoracionesPorHora[hora].sectoresPositivos[sectorKey] || 0) + 1;
                         if (comentario) processedData.nubes.positiva.push(...getWordsFromString(comentario)); break;
                     case 'Positiva':
                         processedData.general.positivas++; processedData.porDia[diaSemana].positivas++; processedData.porHora[hora].positivas++; processedData.porSector[sectorKey].positivas++; dailyDetails[diaSemana].sectores[sectorKey].positivas++;
@@ -201,7 +207,6 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
 
         if (processedData.general.total === 0) return res.status(400).json({ success: false, message: 'El archivo no contiene filas con un formato válido.' });
         
-        // CORRECCIÓN: Lógica para procesar los datos de sectores por día
         for (const dia of Object.keys(dailyDetails)) {
             const detallesSectoresDia = dailyDetails[dia].sectores;
             const sectoresCalculados = [];
@@ -229,7 +234,6 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
         for (const dia in processedData.porDia) {
             let sectorMasCritico = { nombre: 'N/A', satisfaccion: 101, criticos: 'N/A', total: 0, comentarios: [] };
             
-            // Usamos la nueva data diaria para encontrar el sector más crítico del día
             if (processedData.porDia[dia].sectoresDelDia) {
                  processedData.porDia[dia].sectoresDelDia.forEach(({ nombre, stats }) => {
                     if (stats.total < 3) return;
@@ -244,10 +248,17 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
                     }
                 });
             }
+            
+            const picoPositivo = dailyDetails[dia].valoracionesPorHora.reduce((p, c, i) => c.muy_positivas > p.count ? { hora: i, count: c.muy_positivas } : p, { hora: -1, count: -1 });
 
             const conclusionIA = await encontrarComentarioMasCritico(sectorMasCritico.comentarios);
 
             processedData.porDia[dia].analisis = {
+                picoPositivo: {
+                    hora: picoPositivo.hora,
+                    count: picoPositivo.count,
+                    sectores: picoPositivo.hora !== -1 ? getTopItems(dailyDetails[dia].valoracionesPorHora[picoPositivo.hora].sectoresPositivos) : 'N/A'
+                },
                 sectorCritico: sectorMasCritico,
                 conclusionIA: conclusionIA
             };
