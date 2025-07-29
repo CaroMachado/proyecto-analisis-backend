@@ -1,9 +1,9 @@
-// server.js - VERSIÓN FINAL AUTÓNOMA Y FUNCIONAL (SIN IA EXTERNA)
+// server.js - VERSIÓN FINAL CON GENERACIÓN DE IMAGEN DE NUBE
 const express = require('express');
 const multer = require('multer');
 const ExcelJS = require('exceljs');
 const cors = require('cors');
-// const axios = require('axios'); // Ya no se necesita
+const WordCloud = require('node-wordcloud')(); // Herramienta para crear la imagen
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -24,10 +24,7 @@ app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 app.use(express.json());
 
-// --- RUTA DE SALUD (HEALTH CHECK) ---
-app.get('/health', (req, res) => {
-    res.status(200).send('OK');
-});
+app.get('/health', (req, res) => res.status(200).send('OK'));
 
 // --- FUNCIONES AUXILIARES ---
 const STOPWORDS = ['de', 'la', 'que', 'el', 'en', 'y', 'a', 'los', 'del', 'se', 'las', 'por', 'un', 'para', 'con', 'no', 'una', 'su', 'al', 'lo', 'como', 'más', 'pero', 'sus', 'le', 'ya', 'o', 'este', 'ha', 'me', 'si', 'sin', 'sobre', 'muy', 'cuando', 'también', 'hasta', 'hay', 'donde', 'quien', 'desde', 'todo', 'nos', 'durante', 'uno', 'ni', 'contra', 'ese', 'eso', 'mi', 'qué', 'e', 'son', 'fue', 'gracias', 'hola', 'buen', 'dia', 'punto', 'puntos'];
@@ -66,33 +63,25 @@ function parseDateTime(fechaCell, horaCell) {
     } catch { return null; }
 }
 
-// --- NUEVA FUNCIÓN DE ANÁLISIS DE SENTIMIENTO LOCAL (100% FIABLE) ---
 function analizarComentarioMasCritico(comentarios) {
     const fallbackMessage = "No se encontraron comentarios negativos específicos para analizar.";
     if (!comentarios || comentarios.length === 0) return fallbackMessage;
-    
-    // Diccionario de palabras negativas simples. Se puede expandir.
     const PALABRAS_NEGATIVAS = ['malo', 'horrible', 'asco', 'sucio', 'lento', 'caro', 'tarde', 'espera', 'problema', 'queja', 'nunca', 'falta', 'pocos', 'nada', 'mal', 'feo', 'esperar'];
-    
     let comentarioMasNegativo = "";
     let puntuacionMasAlta = 0;
-
     comentarios.forEach(comentario => {
         let puntuacionActual = 0;
         const palabras = comentario.toLowerCase().match(/\b(\w+)\b/g) || [];
-        
         palabras.forEach(palabra => {
             if (PALABRAS_NEGATIVAS.includes(palabra)) {
                 puntuacionActual++;
             }
         });
-
         if (puntuacionActual > puntuacionMasAlta) {
             puntuacionMasAlta = puntuacionActual;
             comentarioMasNegativo = comentario;
         }
     });
-
     if (puntuacionMasAlta > 0) {
         return `<strong>Comentario más crítico detectado:</strong><br>"<em>${comentarioMasNegativo}</em>"`;
     } else {
@@ -100,11 +89,39 @@ function analizarComentarioMasCritico(comentarios) {
     }
 }
 
+// --- NUEVA FUNCIÓN PARA DIBUJAR LA NUBE DE PALABRAS COMO UNA IMAGEN ---
+async function generarNubeComoImagen(wordList, colorPalette) {
+    if (!wordList || wordList.length === 0) {
+        return null;
+    }
+    const options = {
+        width: 800,
+        height: 600,
+        list: wordList,
+        gridSize: 8,
+        weightFactor: 6,
+        fontFamily: 'Impact, sans-serif',
+        color: (word, weight) => {
+            const maxWeight = Math.max(...wordList.map(item => item[1]));
+            return weight > (maxWeight / 3) ? colorPalette.strong : colorPalette.light;
+        },
+        rotateRatio: 0.5,
+        rotationSteps: 2,
+        backgroundColor: '#ffffff'
+    };
+    try {
+        const dataURL = await WordCloud.toDataURL(options);
+        return dataURL.split(',')[1]; 
+    } catch (e) {
+        console.error("Error al generar la imagen de la nube de palabras:", e);
+        return null;
+    }
+}
 
 const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
 
-app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
+app.post('/procesar', async (req, res) => {
     try {
         if (!req.file) return res.status(400).json({ success: false, message: 'No se subió ningún archivo.' });
 
@@ -238,8 +255,6 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
             }
             
             const picoPositivo = dailyDetails[dia].valoracionesPorHora.reduce((p, c, i) => c.muy_positivas > p.count ? { hora: i, count: c.muy_positivas } : p, { hora: -1, count: -1 });
-
-            // Se llama a la nueva función de análisis local
             const conclusionIA = analizarComentarioMasCritico(sectorMasCritico.comentarios);
 
             processedData.porDia[dia].analisis = {
@@ -258,7 +273,23 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
         processedData.porHora.forEach(hora => hora.satisfaccion = calculateSatisfaction(hora));
         for (const sector in processedData.porSector) processedData.porSector[sector].satisfaccion = calculateSatisfaction(processedData.porSector[sector]);
         
+        const countWords = (arr) => arr.reduce((acc, w) => { acc[w] = (acc[w] || 0) + 1; return acc; }, {});
+        const positiveList = Object.entries(countWords(processedData.nubes.positiva));
+        const negativeList = Object.entries(countWords(processedData.nubes.negativa));
+        
+        const greenPalette = { strong: '#1a7431', light: '#28a745' };
+        const redPalette = { strong: '#b32230', light: '#dc3545' };
+
+        const nubePositivaB64 = await generarNubeComoImagen(positiveList, greenPalette);
+        const nubeNegativaB64 = await generarNubeComoImagen(negativeList, redPalette);
+        
+        processedData.nubes = {
+            positiva_b64: nubePositivaB64,
+            negativa_b64: nubeNegativaB64
+        };
+        
         res.json({ success: true, data: processedData });
+
     } catch (error) {
         console.error('Error fatal al procesar el archivo:', error);
         res.status(500).json({ success: false, message: 'Hubo un error crítico al leer el archivo Excel.' });
