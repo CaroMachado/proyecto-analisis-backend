@@ -89,7 +89,6 @@ function analizarComentarioMasCritico(comentarios) {
     }
 }
 
-// --- NUEVA FUNCIÓN PARA DIBUJAR LA NUBE DE PALABRAS COMO UNA IMAGEN ---
 async function generarNubeComoImagen(wordList, colorPalette) {
     if (!wordList || wordList.length === 0) {
         return null;
