@@ -1,10 +1,10 @@
-// server.js - VERSIÓN FINAL CON GENERACIÓN DE IMAGEN DE NUBE FIABLE
+// server.js - VERSIÓN FINAL CON CORRECCIÓN DEFINITIVA DE UPLOAD
 const express = require('express');
 const multer = require('multer');
 const ExcelJS = require('exceljs');
 const cors = require('cors');
-const { createCanvas } = require('canvas'); // Herramienta de dibujo estándar
-const d3Cloud = require('d3-cloud');       // Algoritmo de layout estándar
+const { createCanvas } = require('canvas');
+const d3Cloud = require('d3-cloud');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -89,13 +89,11 @@ function analizarComentarioMasCritico(comentarios) {
     }
 }
 
-// --- FUNCIÓN DE NUBE DE PALABRAS 100% FIABLE CON CANVAS Y D3-CLOUD ---
 function generarNubeComoImagen(wordList, colorPalette) {
     return new Promise((resolve) => {
         if (!wordList || wordList.length === 0) {
             return resolve(null);
         }
-
         const width = 800;
         const height = 600;
         const maxFreq = Math.max(...wordList.map(item => item[1]), 1);
@@ -106,7 +104,7 @@ function generarNubeComoImagen(wordList, colorPalette) {
             .padding(5)
             .rotate(() => (Math.random() > 0.7 ? 90 : 0))
             .font('Impact')
-            .fontSize(d => 15 + (d.size / maxFreq) * 80) // Fórmula de tamaño potente
+            .fontSize(d => 15 + (d.size / maxFreq) * 80)
             .on('end', words => {
                 const canvas = createCanvas(width, height);
                 const context = canvas.getContext('2d');
@@ -114,7 +112,6 @@ function generarNubeComoImagen(wordList, colorPalette) {
                 context.fillRect(0, 0, width, height);
                 context.textAlign = 'center';
                 context.textBaseline = 'middle';
-
                 words.forEach(word => {
                     context.save();
                     context.translate(word.x, word.y);
@@ -124,22 +121,23 @@ function generarNubeComoImagen(wordList, colorPalette) {
                     context.fillText(word.text, 0, 0);
                     context.restore();
                 });
-
                 const dataUrl = canvas.toDataURL();
                 resolve(dataUrl.split(',')[1]);
             });
-
         layout.start();
     });
 }
 
-
+// Configuración de Multer para recibir el archivo
 const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
 
-app.post('/procesar', async (req, res) => {
+// CORRECCIÓN DEFINITIVA: AÑADIR EL MIDDLEWARE DE MULTER AQUÍ
+app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
     try {
-        if (!req.file) return res.status(400).json({ success: false, message: 'No se subió ningún archivo.' });
+        if (!req.file) {
+            return res.status(400).json({ success: false, message: 'No se subió ningún archivo.' });
+        }
 
         const processedData = {
             general: { muy_positivas: 0, positivas: 0, negativas: 0, muy_negativas: 0, total: 0 },
