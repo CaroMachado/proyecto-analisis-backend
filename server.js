@@ -1,9 +1,9 @@
-// server.js - VERSIÓN FINAL, SEGURA Y COMPLETA
+// server.js - VERSIÓN FINAL AUTÓNOMA Y FUNCIONAL (SIN IA EXTERNA)
 const express = require('express');
 const multer = require('multer');
 const ExcelJS = require('exceljs');
 const cors = require('cors');
-const axios = require('axios');
+// const axios = require('axios'); // Ya no se necesita
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -24,7 +24,7 @@ app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 app.use(express.json());
 
-// --- RUTA DE SALUD (HEALTH CHECK) PARA ESTABILIDAD EN RENDER ---
+// --- RUTA DE SALUD (HEALTH CHECK) ---
 app.get('/health', (req, res) => {
     res.status(200).send('OK');
 });
@@ -66,47 +66,37 @@ function parseDateTime(fechaCell, horaCell) {
     } catch { return null; }
 }
 
-// --- FUNCIÓN DE IA FIABLE USANDO LA VARIABLE DE ENTORNO ---
-async function encontrarComentarioMasCritico(comentarios) {
+// --- NUEVA FUNCIÓN DE ANÁLISIS DE SENTIMIENTO LOCAL (100% FIABLE) ---
+function analizarComentarioMasCritico(comentarios) {
     const fallbackMessage = "No se encontraron comentarios negativos específicos para analizar.";
     if (!comentarios || comentarios.length === 0) return fallbackMessage;
-    // Usa la variable de entorno, el método correcto y seguro
-    if (!process.env.HF_API_TOKEN) {
-        return "Análisis no disponible (El token HF_API_TOKEN no está configurado en el servidor de Render).";
-    }
+    
+    // Diccionario de palabras negativas simples. Se puede expandir.
+    const PALABRAS_NEGATIVAS = ['malo', 'horrible', 'asco', 'sucio', 'lento', 'caro', 'tarde', 'espera', 'problema', 'queja', 'nunca', 'falta', 'pocos', 'nada', 'mal', 'feo', 'esperar'];
+    
+    let comentarioMasNegativo = "";
+    let puntuacionMasAlta = 0;
 
-    const API_URL = "https://api-inference.huggingface.co/models/pysentimiento/robertuito-sentiment-analysis";
-    const headers = { 'Authorization': `Bearer ${process.env.HF_API_TOKEN}` };
-
-    try {
-        const response = await axios.post(API_URL, { inputs: comentarios }, { headers, timeout: 20000 });
-        const resultados = response.data;
-        let comentarioMasNegativo = "";
-        let puntuacionMasAlta = -1;
-
-        if (!Array.isArray(resultados)) {
-            console.error("Formato de respuesta de IA inesperado:", resultados);
-            throw new Error("Formato de respuesta de IA inesperado");
-        }
-            
-        for (let i = 0; i < resultados.length; i++) {
-            const sentimiento = resultados[i];
-            let negScore = 0;
-            for(const s of sentimiento){
-                if(s.label === 'NEG'){
-                    negScore = s.score;
-                    break;
-                }
+    comentarios.forEach(comentario => {
+        let puntuacionActual = 0;
+        const palabras = comentario.toLowerCase().match(/\b(\w+)\b/g) || [];
+        
+        palabras.forEach(palabra => {
+            if (PALABRAS_NEGATIVAS.includes(palabra)) {
+                puntuacionActual++;
             }
-            if (negScore > puntuacionMasAlta) {
-                puntuacionMasAlta = negScore;
-                comentarioMasNegativo = comentarios[i];
-            }
+        });
+
+        if (puntuacionActual > puntuacionMasAlta) {
+            puntuacionMasAlta = puntuacionActual;
+            comentarioMasNegativo = comentario;
         }
-        return comentarioMasNegativo ? `<strong>Comentario más crítico detectado:</strong><br>"<em>${comentarioMasNegativo}</em>"` : fallbackMessage;
-    } catch (error) {
-        console.error("Error en el análisis de sentimiento:", error.response ? error.response.data : error.message);
-        return "Fallo el servicio de análisis de comentarios.";
+    });
+
+    if (puntuacionMasAlta > 0) {
+        return `<strong>Comentario más crítico detectado:</strong><br>"<em>${comentarioMasNegativo}</em>"`;
+    } else {
+        return fallbackMessage;
     }
 }
 
@@ -249,7 +239,8 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
             
             const picoPositivo = dailyDetails[dia].valoracionesPorHora.reduce((p, c, i) => c.muy_positivas > p.count ? { hora: i, count: c.muy_positivas } : p, { hora: -1, count: -1 });
 
-            const conclusionIA = await encontrarComentarioMasCritico(sectorMasCritico.comentarios);
+            // Se llama a la nueva función de análisis local
+            const conclusionIA = analizarComentarioMasCritico(sectorMasCritico.comentarios);
 
             processedData.porDia[dia].analisis = {
                 picoPositivo: {
