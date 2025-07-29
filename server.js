@@ -1,9 +1,10 @@
-// server.js - VERSIÓN FINAL CON GENERACIÓN DE IMAGEN DE NUBE
+// server.js - VERSIÓN FINAL CON GENERACIÓN DE IMAGEN DE NUBE FIABLE
 const express = require('express');
 const multer = require('multer');
 const ExcelJS = require('exceljs');
 const cors = require('cors');
-const WordCloud = require('node-wordcloud')(); // Herramienta para crear la imagen
+const { createCanvas } = require('canvas'); // Herramienta de dibujo estándar
+const d3Cloud = require('d3-cloud');       // Algoritmo de layout estándar
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -19,14 +20,13 @@ const corsOptions = {
         }
     }
 };
-
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 app.use(express.json());
 
 app.get('/health', (req, res) => res.status(200).send('OK'));
 
-// --- FUNCIONES AUXILIARES ---
+// --- FUNCIONES AUXILIARES (Sin cambios) ---
 const STOPWORDS = ['de', 'la', 'que', 'el', 'en', 'y', 'a', 'los', 'del', 'se', 'las', 'por', 'un', 'para', 'con', 'no', 'una', 'su', 'al', 'lo', 'como', 'más', 'pero', 'sus', 'le', 'ya', 'o', 'este', 'ha', 'me', 'si', 'sin', 'sobre', 'muy', 'cuando', 'también', 'hasta', 'hay', 'donde', 'quien', 'desde', 'todo', 'nos', 'durante', 'uno', 'ni', 'contra', 'ese', 'eso', 'mi', 'qué', 'e', 'son', 'fue', 'gracias', 'hola', 'buen', 'dia', 'punto', 'puntos'];
 
 function getWordsFromString(text) {
@@ -89,33 +89,50 @@ function analizarComentarioMasCritico(comentarios) {
     }
 }
 
-async function generarNubeComoImagen(wordList, colorPalette) {
-    if (!wordList || wordList.length === 0) {
-        return null;
-    }
-    const options = {
-        width: 800,
-        height: 600,
-        list: wordList,
-        gridSize: 8,
-        weightFactor: 6,
-        fontFamily: 'Impact, sans-serif',
-        color: (word, weight) => {
-            const maxWeight = Math.max(...wordList.map(item => item[1]));
-            return weight > (maxWeight / 3) ? colorPalette.strong : colorPalette.light;
-        },
-        rotateRatio: 0.5,
-        rotationSteps: 2,
-        backgroundColor: '#ffffff'
-    };
-    try {
-        const dataURL = await WordCloud.toDataURL(options);
-        return dataURL.split(',')[1]; 
-    } catch (e) {
-        console.error("Error al generar la imagen de la nube de palabras:", e);
-        return null;
-    }
+// --- FUNCIÓN DE NUBE DE PALABRAS 100% FIABLE CON CANVAS Y D3-CLOUD ---
+function generarNubeComoImagen(wordList, colorPalette) {
+    return new Promise((resolve, reject) => {
+        if (!wordList || wordList.length === 0) {
+            return resolve(null);
+        }
+
+        const width = 800;
+        const height = 600;
+        const maxFreq = Math.max(...wordList.map(item => item[1]), 1);
+
+        const layout = d3Cloud()
+            .size([width, height])
+            .words(wordList.map(d => ({ text: d[0], size: d[1] })))
+            .padding(5)
+            .rotate(() => (Math.random() > 0.7 ? 90 : 0))
+            .font('Impact')
+            .fontSize(d => 15 + (d.size / maxFreq) * 80) // Fórmula de tamaño potente
+            .on('end', words => {
+                const canvas = createCanvas(width, height);
+                const context = canvas.getContext('2d');
+                context.fillStyle = 'white';
+                context.fillRect(0, 0, width, height);
+                context.textAlign = 'center';
+                context.textBaseline = 'middle';
+
+                words.forEach(word => {
+                    context.save();
+                    context.translate(word.x, word.y);
+                    context.rotate(word.rotate * Math.PI / 180);
+                    context.font = `${word.size}px Impact`;
+                    context.fillStyle = word.size > (maxFreq / 3) ? colorPalette.strong : colorPalette.light;
+                    context.fillText(word.text, 0, 0);
+                    context.restore();
+                });
+
+                const dataUrl = canvas.toDataURL();
+                resolve(dataUrl.split(',')[1]);
+            });
+
+        layout.start();
+    });
 }
+
 
 const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
