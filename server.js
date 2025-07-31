@@ -1,10 +1,8 @@
-// server.js - VERSIÓN FINAL CON MANEJO DE ERRORES ROBUSTO
+// server.js - VERSIÓN FINAL AUTÓNOMA Y FUNCIONAL (SIN GENERACIÓN DE IMÁGENES)
 const express = require('express');
 const multer = require('multer');
 const ExcelJS = require('exceljs');
 const cors = require('cors');
-const { createCanvas } = require('canvas');
-const d3Cloud = require('d3-cloud');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -20,11 +18,15 @@ const corsOptions = {
         }
     }
 };
+
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 app.use(express.json());
 
-app.get('/health', (req, res) => res.status(200).send('OK'));
+// --- RUTA DE SALUD (HEALTH CHECK) ---
+app.get('/health', (req, res) => {
+    res.status(200).send('OK');
+});
 
 // --- FUNCIONES AUXILIARES ---
 const STOPWORDS = ['de', 'la', 'que', 'el', 'en', 'y', 'a', 'los', 'del', 'se', 'las', 'por', 'un', 'para', 'con', 'no', 'una', 'su', 'al', 'lo', 'como', 'más', 'pero', 'sus', 'le', 'ya', 'o', 'este', 'ha', 'me', 'si', 'sin', 'sobre', 'muy', 'cuando', 'también', 'hasta', 'hay', 'donde', 'quien', 'desde', 'todo', 'nos', 'durante', 'uno', 'ni', 'contra', 'ese', 'eso', 'mi', 'qué', 'e', 'son', 'fue', 'gracias', 'hola', 'buen', 'dia', 'punto', 'puntos'];
@@ -66,22 +68,28 @@ function parseDateTime(fechaCell, horaCell) {
 function analizarComentarioMasCritico(comentarios) {
     const fallbackMessage = "No se encontraron comentarios negativos específicos para analizar.";
     if (!comentarios || comentarios.length === 0) return fallbackMessage;
+    
     const PALABRAS_NEGATIVAS = ['malo', 'horrible', 'asco', 'sucio', 'lento', 'caro', 'tarde', 'espera', 'problema', 'queja', 'nunca', 'falta', 'pocos', 'nada', 'mal', 'feo', 'esperar'];
+    
     let comentarioMasNegativo = "";
     let puntuacionMasAlta = 0;
+
     comentarios.forEach(comentario => {
         let puntuacionActual = 0;
         const palabras = comentario.toLowerCase().match(/\b(\w+)\b/g) || [];
+        
         palabras.forEach(palabra => {
             if (PALABRAS_NEGATIVAS.includes(palabra)) {
                 puntuacionActual++;
             }
         });
+
         if (puntuacionActual > puntuacionMasAlta) {
             puntuacionMasAlta = puntuacionActual;
             comentarioMasNegativo = comentario;
         }
     });
+
     if (puntuacionMasAlta > 0) {
         return `<strong>Comentario más crítico detectado:</strong><br>"<em>${comentarioMasNegativo}</em>"`;
     } else {
@@ -89,52 +97,12 @@ function analizarComentarioMasCritico(comentarios) {
     }
 }
 
-function generarNubeComoImagen(wordList, colorPalette) {
-    return new Promise((resolve) => {
-        if (!wordList || wordList.length === 0) {
-            return resolve(null);
-        }
-        const width = 800;
-        const height = 600;
-        const maxFreq = Math.max(...wordList.map(item => item[1]), 1);
-        const layout = d3Cloud()
-            .size([width, height])
-            .words(wordList.map(d => ({ text: d[0], size: d[1] })))
-            .padding(5)
-            .rotate(() => (Math.random() > 0.7 ? 90 : 0))
-            .font('Impact')
-            .fontSize(d => 15 + (d.size / maxFreq) * 80)
-            .on('end', words => {
-                const canvas = createCanvas(width, height);
-                const context = canvas.getContext('2d');
-                context.fillStyle = 'white';
-                context.fillRect(0, 0, width, height);
-                context.textAlign = 'center';
-                context.textBaseline = 'middle';
-                words.forEach(word => {
-                    context.save();
-                    context.translate(word.x, word.y);
-                    context.rotate(word.rotate * Math.PI / 180);
-                    context.font = `${word.size}px Impact`;
-                    context.fillStyle = word.size > (maxFreq / 3) ? colorPalette.strong : colorPalette.light;
-                    context.fillText(word.text, 0, 0);
-                    context.restore();
-                });
-                const dataUrl = canvas.toDataURL();
-                resolve(dataUrl.split(',')[1]);
-            });
-        layout.start();
-    });
-}
-
 const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
 
 app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
     try {
-        if (!req.file) {
-            return res.status(400).json({ success: false, message: 'No se subió ningún archivo.' });
-        }
+        if (!req.file) return res.status(400).json({ success: false, message: 'No se subió ningún archivo.' });
 
         const processedData = {
             general: { muy_positivas: 0, positivas: 0, negativas: 0, muy_negativas: 0, total: 0 },
@@ -283,38 +251,6 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
         for (const dia in processedData.porDia) processedData.porDia[dia].satisfaccion = calculateSatisfaction(processedData.porDia[dia]);
         processedData.porHora.forEach(hora => hora.satisfaccion = calculateSatisfaction(hora));
         for (const sector in processedData.porSector) processedData.porSector[sector].satisfaccion = calculateSatisfaction(processedData.porSector[sector]);
-        
-        const countWords = (arr) => arr.reduce((acc, w) => { acc[w] = (acc[w] || 0) + 1; return acc; }, {});
-        let positiveList = Object.entries(countWords(processedData.nubes.positiva));
-        let negativeList = Object.entries(countWords(processedData.nubes.negativa));
-
-        positiveList.sort((a, b) => b[1] - a[1]);
-        negativeList.sort((a, b) => b[1] - a[1]);
-        positiveList = positiveList.slice(0, 40);
-        negativeList = negativeList.slice(0, 40);
-        
-        const greenPalette = { strong: '#1a7431', light: '#28a745' };
-        const redPalette = { strong: '#b32230', light: '#dc3545' };
-
-        let nubePositivaB64 = null;
-        let nubeNegativaB64 = null;
-
-        // --- BLOQUE DE SEGURIDAD PARA LA NUBE DE PALABRAS ---
-        try {
-            nubePositivaB64 = await generarNubeComoImagen(positiveList, greenPalette);
-        } catch (err) {
-            console.error("ERROR CRÍTICO AL GENERAR NUBE POSITIVA:", err);
-        }
-        try {
-            nubeNegativaB64 = await generarNubeComoImagen(negativeList, redPalette);
-        } catch (err) {
-            console.error("ERROR CRÍTICO AL GENERAR NUBE NEGATIVA:", err);
-        }
-        
-        processedData.nubes = {
-            positiva_b64: nubePositivaB64,
-            negativa_b64: nubeNegativaB64
-        };
         
         res.json({ success: true, data: processedData });
 
