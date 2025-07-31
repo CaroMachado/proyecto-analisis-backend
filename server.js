@@ -1,4 +1,4 @@
-// server.js - VERSIÓN FINAL CON GENERACIÓN DE IMAGEN DE NUBE FIABLE Y FILTRADO
+// server.js - VERSIÓN FINAL CON MANEJO DE ERRORES ROBUSTO
 const express = require('express');
 const multer = require('multer');
 const ExcelJS = require('exceljs');
@@ -97,14 +97,13 @@ function generarNubeComoImagen(wordList, colorPalette) {
         const width = 800;
         const height = 600;
         const maxFreq = Math.max(...wordList.map(item => item[1]), 1);
-
         const layout = d3Cloud()
             .size([width, height])
             .words(wordList.map(d => ({ text: d[0], size: d[1] })))
             .padding(5)
-            .rotate(() => (Math.random() > 0.5 ? 90 : 0))
+            .rotate(() => (Math.random() > 0.7 ? 90 : 0))
             .font('Impact')
-            .fontSize(d => 18 + (d.size / maxFreq) * 90)
+            .fontSize(d => 15 + (d.size / maxFreq) * 80)
             .on('end', words => {
                 const canvas = createCanvas(width, height);
                 const context = canvas.getContext('2d');
@@ -133,7 +132,9 @@ const upload = multer({ storage: storage });
 
 app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
     try {
-        if (!req.file) return res.status(400).json({ success: false, message: 'No se subió ningún archivo.' });
+        if (!req.file) {
+            return res.status(400).json({ success: false, message: 'No se subió ningún archivo.' });
+        }
 
         const processedData = {
             general: { muy_positivas: 0, positivas: 0, negativas: 0, muy_negativas: 0, total: 0 },
@@ -284,7 +285,6 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
         for (const sector in processedData.porSector) processedData.porSector[sector].satisfaccion = calculateSatisfaction(processedData.porSector[sector]);
         
         const countWords = (arr) => arr.reduce((acc, w) => { acc[w] = (acc[w] || 0) + 1; return acc; }, {});
-        
         let positiveList = Object.entries(countWords(processedData.nubes.positiva));
         let negativeList = Object.entries(countWords(processedData.nubes.negativa));
 
@@ -296,8 +296,20 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
         const greenPalette = { strong: '#1a7431', light: '#28a745' };
         const redPalette = { strong: '#b32230', light: '#dc3545' };
 
-        const nubePositivaB64 = await generarNubeComoImagen(positiveList, greenPalette);
-        const nubeNegativaB64 = await generarNubeComoImagen(negativeList, redPalette);
+        let nubePositivaB64 = null;
+        let nubeNegativaB64 = null;
+
+        // --- BLOQUE DE SEGURIDAD PARA LA NUBE DE PALABRAS ---
+        try {
+            nubePositivaB64 = await generarNubeComoImagen(positiveList, greenPalette);
+        } catch (err) {
+            console.error("ERROR CRÍTICO AL GENERAR NUBE POSITIVA:", err);
+        }
+        try {
+            nubeNegativaB64 = await generarNubeComoImagen(negativeList, redPalette);
+        } catch (err) {
+            console.error("ERROR CRÍTICO AL GENERAR NUBE NEGATIVA:", err);
+        }
         
         processedData.nubes = {
             positiva_b64: nubePositivaB64,
