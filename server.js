@@ -1,315 +1,175 @@
-// server.js - VERSIÓN FINAL CON GENERACIÓN DE IMAGEN DE NUBE FIABLE
-const express = require('express');
-const multer = require('multer');
-const ExcelJS = require('exceljs');
-const cors = require('cors');
-const { createCanvas } = require('canvas'); // Herramienta de dibujo estándar
-const d3Cloud = require('d3-cloud');       // Algoritmo de layout estándar
+// script.js - VERSIÓN FINAL CON VISUALIZACIÓN DE NUBE COMO IMAGEN
+document.addEventListener('DOMContentLoaded', function() {
+    const uploadForm = document.getElementById('uploadForm');
+    const reporteContainer = document.getElementById('reporte-container');
+    const loader = document.getElementById('loader');
+    const errorDiv = document.getElementById('error');
+    const downloadBtn = document.getElementById('downloadPdf');
+    
+    // CORRECCIÓN: Referencia correcta al input del archivo
+    const archivoInput = document.getElementById('archivoExcel'); 
 
-const app = express();
-const PORT = process.env.PORT || 3000;
+    const API_URL = 'https://proyecto-analisis-backend-znf7.onrender.com/procesar';
+    const COLORS = {
+        muy_positiva: '#28a745', positiva: '#5cb85c', negativa: '#e74c3c',
+        muy_negativa: '#dc3545', nps_line: '#343a40'
+    };
 
-// --- CONFIGURACIÓN DE CORS ---
-const whitelist = ['https://devwebcm.com', 'http://localhost:5500', 'http://127.0.0.1:5500'];
-const corsOptions = {
-    origin: function (origin, callback) {
-        if (!origin || whitelist.indexOf(origin) !== -1) {
-            callback(null, true);
-        } else {
-            callback(new Error('No permitido por CORS'));
-        }
-    }
-};
-app.use(cors(corsOptions));
-app.options('*', cors(corsOptions));
-app.use(express.json());
+    Chart.register(ChartDataLabels);
 
-app.get('/health', (req, res) => res.status(200).send('OK'));
+    uploadForm.addEventListener('submit', function(e) {
+        e.preventDefault();
+        loader.style.display = 'block';
+        errorDiv.style.display = 'none';
+        reporteContainer.innerHTML = '';
+        downloadBtn.style.display = 'none';
+        
+        // CORRECCIÓN: Usar el FormData del formulario directamente
+        const formData = new FormData(uploadForm);
 
-// --- FUNCIONES AUXILIARES ---
-const STOPWORDS = ['de', 'la', 'que', 'el', 'en', 'y', 'a', 'los', 'del', 'se', 'las', 'por', 'un', 'para', 'con', 'no', 'una', 'su', 'al', 'lo', 'como', 'más', 'pero', 'sus', 'le', 'ya', 'o', 'este', 'ha', 'me', 'si', 'sin', 'sobre', 'muy', 'cuando', 'también', 'hasta', 'hay', 'donde', 'quien', 'desde', 'todo', 'nos', 'durante', 'uno', 'ni', 'contra', 'ese', 'eso', 'mi', 'qué', 'e', 'son', 'fue', 'gracias', 'hola', 'buen', 'dia', 'punto', 'puntos'];
-
-function getWordsFromString(text) {
-    if (!text || typeof text !== 'string') return [];
-    return text.toLowerCase().match(/\b(\w+)\b/g)?.filter(word => !STOPWORDS.includes(word) && word.length > 2) || [];
-}
-
-function calculateSatisfaction(stats) {
-    if (!stats || stats.total === 0) return 0;
-    const promotores = stats.muy_positivas || 0;
-    const detractores = (stats.negativas || 0) + (stats.muy_negativas || 0);
-    const indice = ((promotores / stats.total) - (detractores / stats.total)) * 100;
-    return Math.round(indice);
-}
-
-function parseDateTime(fechaCell, horaCell) {
-    try {
-        if (!fechaCell || !horaCell) return null;
-        let baseDate = fechaCell instanceof Date ? fechaCell : new Date(fechaCell);
-        if (isNaN(baseDate.getTime())) return null;
-        let hours = 0, minutes = 0;
-        if (horaCell instanceof Date) {
-            hours = horaCell.getUTCHours(); minutes = horaCell.getUTCMinutes();
-        } else if (typeof horaCell === 'number') {
-            const totalSecondsInDay = horaCell * 86400;
-            hours = Math.floor(totalSecondsInDay / 3600) % 24;
-            minutes = Math.floor((totalSecondsInDay % 3600) / 60);
-        } else if (typeof horaCell === 'string') {
-            const parts = horaCell.split(':');
-            hours = parseInt(parts[0], 10) || 0; minutes = parseInt(parts[1], 10) || 0;
-        } else { return null; }
-        const finalDate = new Date(Date.UTC(baseDate.getUTCFullYear(), baseDate.getUTCMonth(), baseDate.getUTCDate(), hours, minutes));
-        return isNaN(finalDate.getTime()) ? null : finalDate;
-    } catch { return null; }
-}
-
-function analizarComentarioMasCritico(comentarios) {
-    const fallbackMessage = "No se encontraron comentarios negativos específicos para analizar.";
-    if (!comentarios || comentarios.length === 0) return fallbackMessage;
-    const PALABRAS_NEGATIVAS = ['malo', 'horrible', 'asco', 'sucio', 'lento', 'caro', 'tarde', 'espera', 'problema', 'queja', 'nunca', 'falta', 'pocos', 'nada', 'mal', 'feo', 'esperar'];
-    let comentarioMasNegativo = "";
-    let puntuacionMasAlta = 0;
-    comentarios.forEach(comentario => {
-        let puntuacionActual = 0;
-        const palabras = comentario.toLowerCase().match(/\b(\w+)\b/g) || [];
-        palabras.forEach(palabra => {
-            if (PALABRAS_NEGATIVAS.includes(palabra)) {
-                puntuacionActual++;
+        fetch(API_URL, { method: 'POST', body: formData })
+        .then(async response => {
+            if (!response.ok) {
+                // Si la respuesta es 400, el servidor enviará un mensaje específico.
+                const errorData = await response.json().catch(() => ({ message: `Error ${response.status}: ${response.statusText}` }));
+                throw new Error(errorData.message || 'Error desconocido del servidor');
             }
+            return response.json();
+        })
+        .then(result => {
+            loader.style.display = 'none';
+            if (result.success && result.data.general.total > 0) {
+                generarInforme(result.data);
+                downloadBtn.style.display = 'block';
+            } else {
+                errorDiv.textContent = 'Error: ' + (result.message || 'No se encontraron datos válidos.');
+                errorDiv.style.display = 'block';
+            }
+        })
+        .catch(err => {
+            loader.style.display = 'none';
+            errorDiv.textContent = 'Error: ' + err.message;
+            errorDiv.style.display = 'block';
         });
-        if (puntuacionActual > puntuacionMasAlta) {
-            puntuacionMasAlta = puntuacionActual;
-            comentarioMasNegativo = comentario;
-        }
     });
-    if (puntuacionMasAlta > 0) {
-        return `<strong>Comentario más crítico detectado:</strong><br>"<em>${comentarioMasNegativo}</em>"`;
-    } else {
-        return fallbackMessage;
-    }
-}
 
-// --- FUNCIÓN DE NUBE DE PALABRAS 100% FIABLE CON CANVAS Y D3-CLOUD ---
-function generarNubeComoImagen(wordList, colorPalette) {
-    return new Promise((resolve) => {
-        if (!wordList || wordList.length === 0) {
-            return resolve(null);
-        }
+    downloadBtn.addEventListener('click', function() {
+        loader.style.display = 'block';
+        const { jsPDF } = window.jspdf;
+        const pdf = new jsPDF('p', 'pt', 'a4', true);
+        const pages = reporteContainer.querySelectorAll('.report-page');
 
-        const width = 800;
-        const height = 600;
-        const maxFreq = Math.max(...wordList.map(item => item[1]), 1);
+        const promises = Array.from(pages).map(page =>
+            html2canvas(page, { scale: 2.5, useCORS: true, backgroundColor: null })
+        );
 
-        const layout = d3Cloud()
-            .size([width, height])
-            .words(wordList.map(d => ({ text: d[0], size: d[1] })))
-            .padding(5)
-            .rotate(() => (Math.random() > 0.7 ? 90 : 0))
-            .font('Impact')
-            .fontSize(d => 15 + (d.size / maxFreq) * 80) // Fórmula de tamaño potente
-            .on('end', words => {
-                const canvas = createCanvas(width, height);
-                const context = canvas.getContext('2d');
-                context.fillStyle = 'white';
-                context.fillRect(0, 0, width, height);
-                context.textAlign = 'center';
-                context.textBaseline = 'middle';
-
-                words.forEach(word => {
-                    context.save();
-                    context.translate(word.x, word.y);
-                    context.rotate(word.rotate * Math.PI / 180);
-                    context.font = `${word.size}px Impact`;
-                    context.fillStyle = word.size > (maxFreq / 3) ? colorPalette.strong : colorPalette.light;
-                    context.fillText(word.text, 0, 0);
-                    context.restore();
-                });
-
-                const dataUrl = canvas.toDataURL();
-                resolve(dataUrl.split(',')[1]);
+        Promise.all(promises).then(canvases => {
+            canvases.forEach((canvas, index) => {
+                const imgData = canvas.toDataURL('image/png', 0.95);
+                const pdfWidth = pdf.internal.pageSize.getWidth();
+                const pdfHeight = pdf.internal.pageSize.getHeight();
+                if (index > 0) pdf.addPage();
+                pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
             });
-
-        layout.start();
+            pdf.save('Informe-Satisfaccion-Hipodromo.pdf');
+            loader.style.display = 'none';
+        });
     });
-}
 
+    function generarInforme(data) {
+        const fechas = [...new Set(data.fechas)].join(', ');
+        const ordenSemanas = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
+        const diasOrdenados = Object.keys(data.porDia).sort((a, b) => ordenSemanas.indexOf(a) - ordenSemanas.indexOf(b));
 
-const storage = multer.memoryStorage();
-const upload = multer({ storage: storage });
+        reporteContainer.innerHTML = `
+            <div class="report-page"><h1>INFORME<br>FIN DE SEMANA<br>${fechas}</h1></div>
+            <div class="report-page"><h2>SATISFACCIÓN POR DÍA</h2><div class="chart-container"><canvas id="satisfaccionPorDiaChart"></canvas></div></div>
+            <div class="report-page"><h2>ANÁLISIS DE COMENTARIOS</h2><div class="wordcloud-container"><div class="wordcloud-box"><h3>Palabras Clave Positivas</h3><div id="wordCloudPositive" class="wordcloud-image"></div></div><div class="wordcloud-box"><h3>Palabras Clave Negativas</h3><div id="wordCloudNegative" class="wordcloud-image"></div></div></div></div>
+            <div class="report-page"><h2>SATISFACCIÓN POR HORA</h2><div class="chart-container"><canvas id="satisfaccionPorHoraChart"></canvas></div></div>
+            ${diasOrdenados.map(dia => generarPaginaDia(dia, data)).join('')}
+            <div class="report-page" style="justify-content:center;"><h1 style="font-size: 36px;">Muchas gracias</h1></div>`;
 
-app.post('/procesar', async (req, res) => {
-    try {
-        if (!req.file) return res.status(400).json({ success: false, message: 'No se subió ningún archivo.' });
+        renderGraficos(data, diasOrdenados);
+        renderNubes(data.nubes);
+    }
 
-        const processedData = {
-            general: { muy_positivas: 0, positivas: 0, negativas: 0, muy_negativas: 0, total: 0 },
-            porDia: {},
-            porHora: Array.from({ length: 24 }, () => ({ muy_positivas: 0, positivas: 0, negativas: 0, muy_negativas: 0, total: 0 })),
-            porSector: {},
-            nubes: { positiva: [], negativa: [] },
-            fechas: [],
-        };
-        const dailyDetails = {};
-        const DIAS_SEMANA = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+    function generarPaginaDia(dia, data) {
+        const diaData = data.porDia[dia];
+        const analisis = diaData.analisis;
 
-        const workbook = new ExcelJS.Workbook();
-        await workbook.xlsx.load(req.file.buffer);
-        const worksheet = workbook.worksheets[0];
+        const resumenPositivo = `Se recibieron <strong>${diaData.muy_positivas}</strong> calificaciones Muy Positivas.`;
+        const picoPositivo = analisis.picoPositivo.hora !== -1 
+            ? `El pico de valoraciones <strong>Muy Positivas</strong> fue a las <strong>${analisis.picoPositivo.hora}hs</strong> (${analisis.picoPositivo.count} respuestas), destacándose en: <strong>${analisis.picoPositivo.sectores}</strong>.` 
+            : "No hubo un pico destacable de valoraciones positivas.";
+        
+        let insightCritico = "No se identificó un sector particularmente crítico durante el día.";
+        if (analisis.sectorCritico.nombre !== 'N/A') {
+            insightCritico = `El sector con menor satisfacción fue <strong>${analisis.sectorCritico.nombre}</strong> (índice ${analisis.sectorCritico.satisfaccion}). Los motivos principales de queja fueron: <strong>${analisis.sectorCritico.criticos}</strong>.
+            <br><br><strong>Análisis de Comentarios:</strong><br><div class="ia-conclusion">${analisis.conclusionIA.replace(/\n/g, '<br>')}</div>`;
+        }
+        
+        const sectoresDelDia = diaData.sectoresDelDia || [];
+        sectoresDelDia.sort((a, b) => b.stats.satisfaccion - a.stats.satisfaccion);
 
-        let columnMap = {};
-        worksheet.getRow(1).eachCell((cell, colNumber) => {
-            if (cell.value) columnMap[cell.value.toString().toLowerCase().trim().replace(/ /g, '_')] = colNumber;
+        const mejores = sectoresDelDia.slice(0, 5);
+        const peores = sectoresDelDia.slice(-5).reverse();
+
+        return `
+            <div class="report-page">
+                <h2 style="text-transform: uppercase;">${dia}</h2>
+                <div class="day-details-container">
+                    <div class="summary-cards">
+                        <div class="summary-card"><span class="icon">👍</span><p>${resumenPositivo}<br><br>${picoPositivo}</p></div>
+                        <div class="summary-card"><span class="icon">🚨</span><p>${insightCritico}</p></div>
+                    </div>
+                    <div class="sector-tables">
+                        <div class="sector-table"><h3>Mejores Sectores (del Día)</h3>${generarTablaSectores(mejores)}</div>
+                        <div class="sector-table"><h3>Sectores a Mejorar (del Día)</h3>${generarTablaSectores(peores)}</div>
+                    </div>
+                </div>
+            </div>`;
+    }
+
+    function renderGraficos(data, diasOrdenados) {
+        const ctxDia = document.getElementById('satisfaccionPorDiaChart').getContext('2d');
+        new Chart(ctxDia, {
+            type: 'bar',
+            data: { labels: diasOrdenados, datasets: [ { type: 'line', label: 'Índice de Satisfacción', data: diasOrdenados.map(d => data.porDia[d].satisfaccion), borderColor: COLORS.nps_line, yAxisID: 'y1', tension: 0.1, datalabels: { align: 'top', anchor: 'end', backgroundColor: 'rgba(52, 58, 64, 0.75)', borderRadius: 4, color: 'white', font: { weight: 'bold' }, padding: 6, formatter: v => v.toFixed(0) } }, { label: 'Muy Positivas', data: diasOrdenados.map(d => data.porDia[d].muy_positivas), backgroundColor: COLORS.muy_positiva, stack: 'Stack 0', datalabels: { display: false } }, { label: 'Positivas', data: diasOrdenados.map(d => data.porDia[d].positivas), backgroundColor: COLORS.positiva, stack: 'Stack 0', datalabels: { display: false } }, { label: 'Negativas', data: diasOrdenados.map(d => data.porDia[d].negativas), backgroundColor: COLORS.negativa, stack: 'Stack 0', datalabels: { display: false } }, { label: 'Muy Negativas', data: diasOrdenados.map(d => data.porDia[d].muy_negativas), backgroundColor: COLORS.muy_negativa, stack: 'Stack 0', datalabels: { display: false } } ] },
+            options: { responsive: true, maintainAspectRatio: false, scales: { y: { stacked: true, title: { display: true, text: 'Cantidad de Respuestas' } }, y1: { position: 'right', min: -100, max: 100, title: { display: true, text: 'Índice de Satisfacción' }, grid: { drawOnChartArea: false } } }, plugins: { legend: { position: 'top' }, datalabels: { display: ctx => ctx.dataset.type === 'line' } } }
         });
+        const ctxHora = document.getElementById('satisfaccionPorHoraChart').getContext('2d');
+        new Chart(ctxHora, {
+            type: 'bar',
+            data: { labels: Array.from({ length: 24 }, (_, i) => `${i}:00`), datasets: [ { type: 'line', label: 'Índice de Satisfacción', data: data.porHora.map(h => h.satisfaccion), borderColor: COLORS.nps_line, yAxisID: 'y1', tension: 0.4, datalabels: { display: true, align: 'top', anchor: 'end', font: { size: 9 }, color: COLORS.nps_line, formatter: (value, context) => data.porHora[context.dataIndex].total > 0 ? value.toFixed(0) : '', backgroundColor: 'rgba(255, 255, 255, 0.6)', borderRadius: 3, padding: { top: 2, bottom: 1, left: 4, right: 4 } } }, { label: 'Muy Positivas', data: data.porHora.map(h => h.muy_positivas), backgroundColor: COLORS.muy_positiva, stack: 'Stack 0' }, { label: 'Positivas', data: data.porHora.map(h => h.positivas), backgroundColor: COLORS.positiva, stack: 'Stack 0' }, { label: 'Negativas', data: data.porHora.map(h => h.negativas), backgroundColor: COLORS.negativa, stack: 'Stack 0' }, { label: 'Muy Negativas', data: data.porHora.map(h => h.muy_negativas), backgroundColor: COLORS.muy_negativa, stack: 'Stack 0' } ] },
+            options: { responsive: true, maintainAspectRatio: false, scales: { x: { title: { display: true, text: 'Hora del Día' } }, y: { stacked: true, title: { display: true, text: 'Cantidad de Respuestas' } }, y1: { position: 'right', min: -100, max: 100, title: { display: true, text: 'Índice de Satisfacción' }, grid: { drawOnChartArea: false } } }, plugins: { legend: { position: 'top' }, datalabels: { display: ctx => ctx.dataset.type === 'line' } } }
+        });
+    }
 
-        const requiredColumns = ['fecha', 'hora', 'sector', 'ubicacion', 'calificacion_descripcion'];
-        for (const col of requiredColumns) {
-            if (!columnMap[col]) return res.status(400).json({ success: false, message: `El archivo Excel no contiene la columna requerida: "${col}"` });
+    function renderNubes(nubesData) {
+        const positiveContainer = document.getElementById('wordCloudPositive');
+        const negativeContainer = document.getElementById('wordCloudNegative');
+
+        if (nubesData.positiva_b64) {
+            positiveContainer.innerHTML = `<img src="data:image/png;base64,${nubesData.positiva_b64}" alt="Nube de palabras positivas" style="width: 100%; height: auto;">`;
+        } else {
+            positiveContainer.style.display = 'flex';
+            positiveContainer.style.alignItems = 'center';
+            positiveContainer.style.justifyContent = 'center';
+            positiveContainer.textContent = "No hay datos suficientes.";
         }
 
-        worksheet.eachRow((row, rowNumber) => {
-            if (rowNumber === 1) return;
-            try {
-                const jsDate = parseDateTime(row.getCell(columnMap['fecha']).value, row.getCell(columnMap['hora']).value);
-                if (!jsDate) return;
-                const diaSemana = DIAS_SEMANA[jsDate.getUTCDay()];
-                const fechaStr = jsDate.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' });
-                const hora = jsDate.getUTCHours();
-                const sector = String(row.getCell(columnMap['sector']).value || '').trim();
-                const ubicacion = String(row.getCell(columnMap['ubicacion']).value || '').trim();
-                const sectorKey = sector && ubicacion ? `${sector} - ${ubicacion}` : (sector || ubicacion);
-                if (!sectorKey) return;
-                const calificacionDesc = String(row.getCell(columnMap['calificacion_descripcion']).value || '').trim();
-                const comentario = String(row.getCell(columnMap['comentarios'])?.value || '').trim();
-                const puntoCritico = String(row.getCell(columnMap['puntos_criticos'])?.value || '').trim();
-                const puntoDestacado = String(row.getCell(columnMap['destacados'])?.value || '').trim();
-
-                if (!processedData.porDia[diaSemana]) {
-                    processedData.porDia[diaSemana] = { muy_positivas: 0, positivas: 0, negativas: 0, muy_negativas: 0, total: 0, sectoresDelDia: [] };
-                    dailyDetails[diaSemana] = { valoracionesPorHora: Array.from({ length: 24 }, () => ({ muy_positivas: 0, sectoresPositivos: {} })), sectores: {} };
-                }
-                if (!processedData.fechas.includes(fechaStr)) {
-                    processedData.fechas.push(fechaStr);
-                }
-                
-                if (!processedData.porSector[sectorKey]) {
-                    processedData.porSector[sectorKey] = { muy_positivas: 0, positivas: 0, negativas: 0, muy_negativas: 0, total: 0 };
-                }
-                if (!dailyDetails[diaSemana].sectores[sectorKey]) {
-                    dailyDetails[diaSemana].sectores[sectorKey] = { muy_positivas: 0, positivas: 0, negativas: 0, muy_negativas: 0, total: 0, criticos: {}, destacados: {}, comentarios: [] };
-                }
-
-                processedData.general.total++;
-                processedData.porDia[diaSemana].total++;
-                processedData.porHora[hora].total++;
-                processedData.porSector[sectorKey].total++;
-                dailyDetails[diaSemana].sectores[sectorKey].total++;
-                if (puntoCritico) dailyDetails[diaSemana].sectores[sectorKey].criticos[puntoCritico] = (dailyDetails[diaSemana].sectores[sectorKey].criticos[puntoCritico] || 0) + 1;
-                if (puntoDestacado) dailyDetails[diaSemana].sectores[sectorKey].destacados[puntoDestacado] = (dailyDetails[diaSemana].sectores[sectorKey].destacados[puntoDestacado] || 0) + 1;
-                if (comentario) dailyDetails[diaSemana].sectores[sectorKey].comentarios.push(comentario);
-
-                switch (calificacionDesc) {
-                    case 'Muy Positiva':
-                        processedData.general.muy_positivas++; processedData.porDia[diaSemana].muy_positivas++; processedData.porHora[hora].muy_positivas++; processedData.porSector[sectorKey].muy_positivas++; dailyDetails[diaSemana].sectores[sectorKey].muy_positivas++;
-                        dailyDetails[diaSemana].valoracionesPorHora[hora].muy_positivas++;
-                        dailyDetails[diaSemana].valoracionesPorHora[hora].sectoresPositivos[sectorKey] = (dailyDetails[diaSemana].valoracionesPorHora[hora].sectoresPositivos[sectorKey] || 0) + 1;
-                        if (comentario) processedData.nubes.positiva.push(...getWordsFromString(comentario)); break;
-                    case 'Positiva':
-                        processedData.general.positivas++; processedData.porDia[diaSemana].positivas++; processedData.porHora[hora].positivas++; processedData.porSector[sectorKey].positivas++; dailyDetails[diaSemana].sectores[sectorKey].positivas++;
-                        if (comentario) processedData.nubes.positiva.push(...getWordsFromString(comentario)); break;
-                    case 'Negativa':
-                        processedData.general.negativas++; processedData.porDia[diaSemana].negativas++; processedData.porHora[hora].negativas++; processedData.porSector[sectorKey].negativas++; dailyDetails[diaSemana].sectores[sectorKey].negativas++;
-                        if (comentario) processedData.nubes.negativa.push(...getWordsFromString(comentario)); break;
-                    case 'Muy Negativa':
-                        processedData.general.muy_negativas++; processedData.porDia[diaSemana].muy_negativas++; processedData.porHora[hora].muy_negativas++; processedData.porSector[sectorKey].muy_negativas++; dailyDetails[diaSemana].sectores[sectorKey].muy_negativas++;
-                        if (comentario) processedData.nubes.negativa.push(...getWordsFromString(comentario)); break;
-                }
-            } catch (e) { console.warn(`Se ignoró la fila ${rowNumber} por un error de formato.`); }
-        });
-
-        if (processedData.general.total === 0) return res.status(400).json({ success: false, message: 'El archivo no contiene filas con un formato válido.' });
-        
-        for (const dia of Object.keys(dailyDetails)) {
-            const detallesSectoresDia = dailyDetails[dia].sectores;
-            const sectoresCalculados = [];
-            for (const nombreSector in detallesSectoresDia) {
-                const statsSector = detallesSectoresDia[nombreSector];
-                if (statsSector.total > 0) {
-                    statsSector.satisfaccion = calculateSatisfaction(statsSector);
-                    sectoresCalculados.push({ nombre: nombreSector, stats: statsSector });
-                }
-            }
-            if (processedData.porDia[dia]) {
-                processedData.porDia[dia].sectoresDelDia = sectoresCalculados;
-            }
+        if (nubesData.negativa_b64) {
+            negativeContainer.innerHTML = `<img src="data:image/png;base64,${nubesData.negativa_b64}" alt="Nube de palabras negativas" style="width: 100%; height: auto;">`;
+        } else {
+            negativeContainer.style.display = 'flex';
+            negativeContainer.style.alignItems = 'center';
+            negativeContainer.style.justifyContent = 'center';
+            negativeContainer.textContent = "No hay datos suficientes.";
         }
+    }
 
-        processedData.fechas.sort((a, b) => {
-            const [dayA, monthA, yearA] = a.split('/');
-            const [dayB, monthB, yearB] = b.split('/');
-            return new Date(`${yearA}-${monthA}-${dayA}`) - new Date(`${yearB}-${monthB}-${dayB}`);
-        });
-        processedData.fechas = processedData.fechas.map(f => f.split('/')[0]);
-
-        const getTopItems = (obj, count = 3) => Object.entries(obj).sort(([, a], [, b]) => b - a).slice(0, count).map(([name]) => name).join(', ');
-
-        for (const dia in processedData.porDia) {
-            let sectorMasCritico = { nombre: 'N/A', satisfaccion: 101, criticos: 'N/A', total: 0, comentarios: [] };
-            
-            if (processedData.porDia[dia].sectoresDelDia) {
-                 processedData.porDia[dia].sectoresDelDia.forEach(({ nombre, stats }) => {
-                    if (stats.total < 3) return;
-                    if (stats.satisfaccion < sectorMasCritico.satisfaccion) {
-                        sectorMasCritico = {
-                            nombre: nombre,
-                            satisfaccion: stats.satisfaccion,
-                            criticos: getTopItems(stats.criticos, 3) || 'comentarios generales',
-                            total: stats.total,
-                            comentarios: stats.comentarios.filter(c => c.length > 10)
-                        };
-                    }
-                });
-            }
-            
-            const picoPositivo = dailyDetails[dia].valoracionesPorHora.reduce((p, c, i) => c.muy_positivas > p.count ? { hora: i, count: c.muy_positivas } : p, { hora: -1, count: -1 });
-            const conclusionIA = analizarComentarioMasCritico(sectorMasCritico.comentarios);
-
-            processedData.porDia[dia].analisis = {
-                picoPositivo: {
-                    hora: picoPositivo.hora,
-                    count: picoPositivo.count,
-                    sectores: picoPositivo.hora !== -1 ? getTopItems(dailyDetails[dia].valoracionesPorHora[picoPositivo.hora].sectoresPositivos) : 'N/A'
-                },
-                sectorCritico: sectorMasCritico,
-                conclusionIA: conclusionIA
-            };
-        }
-
-        processedData.general.satisfaccion = calculateSatisfaction(processedData.general);
-        for (const dia in processedData.porDia) processedData.porDia[dia].satisfaccion = calculateSatisfaction(processedData.porDia[dia]);
-        processedData.porHora.forEach(hora => hora.satisfaccion = calculateSatisfaction(hora));
-        for (const sector in processedData.porSector) processedData.porSector[sector].satisfaccion = calculateSatisfaction(processedData.porSector[sector]);
-        
-        const countWords = (arr) => arr.reduce((acc, w) => { acc[w] = (acc[w] || 0) + 1; return acc; }, {});
-        const positiveList = Object.entries(countWords(processedData.nubes.positiva));
-        const negativeList = Object.entries(countWords(processedData.nubes.negativa));
-        
-        const greenPalette = { strong: '#1a7431', light: '#28a745' };
-        const redPalette = { strong: '#b32230', light: '#dc3545' };
-
-        const nubePositivaB64 = await generarNubeComoImagen(positiveList, greenPalette);
-        const nubeNegativaB64 = await generarNubeComoImagen(negativeList, redPalette);
-        
-        processedData.nubes = {
-            positiva_b64: nubePositivaB64,
-            negativa_b64: nubeNegativaB64
-        };
-        
-        res.json({ success: true, data: processedData });
-
-    } catch (error) {
-        console.error('Error fatal al procesar el archivo:', error);
-        res.status(500).json({ success: false, message: 'Hubo un error crítico al leer el archivo Excel.' });
+    function generarTablaSectores(sectores) {
+        if (!sectores.length) return '<p>No hay datos de sectores para este día.</p>';
+        return `<table><thead><tr><th>Sector - Ubicación</th><th>Resp.</th><th>Satisf.</th><th>Gráfico</th></tr></thead><tbody>${sectores.map(({ nombre, stats }) => `<tr><td>${nombre}</td><td>${stats.total}</td><td>${stats.satisfaccion.toFixed(0)}</td><td><div class="nps-bar-container"><div class="nps-bar" style="width: ${(stats.satisfaccion + 100) / 2}%;"></div></div></td></tr>`).join('')}</tbody></table>`;
     }
 });
-
-app.listen(PORT, () => console.log(`✅ Servidor corriendo en el puerto ${PORT}`));
