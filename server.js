@@ -4,7 +4,7 @@ const multer = require('multer');
 const ExcelJS = require('exceljs');
 const cors = require('cors');
 const { createCanvas } = require('canvas');
-const d3Cloud = require('d3-cloud');
+const WordCloud = require('wordcloud');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -89,43 +89,34 @@ function analizarComentarioMasCritico(comentarios) {
     }
 }
 
-function generarNubeComoImagen(wordList, colorPalette) {
-    return new Promise((resolve) => {
-        if (!wordList || wordList.length === 0) {
-            return resolve(null);
-        }
-        const width = 800;
-        const height = 600;
-        const maxFreq = Math.max(...wordList.map(item => item[1]), 1);
+async function generarNubeComoImagen(wordList, colorPalette) {
+    if (!wordList || wordList.length === 0) {
+        return null;
+    }
+    const canvas = createCanvas(800, 600);
+    const maxWeight = Math.max(...wordList.map(item => item[1]));
 
-        const layout = d3Cloud()
-            .size([width, height])
-            .words(wordList.map(d => ({ text: d[0], size: d[1] })))
-            .padding(5)
-            .rotate(() => (Math.random() > 0.5 ? -90 : 0))
-            .font('Impact')
-            .fontSize(d => 20 + (d.size / maxFreq) * 100)
-            .on('end', words => {
-                const canvas = createCanvas(width, height);
-                const context = canvas.getContext('2d');
-                context.fillStyle = 'white';
-                context.fillRect(0, 0, width, height);
-                context.textAlign = 'center';
-                context.textBaseline = 'middle';
-                words.forEach(word => {
-                    context.save();
-                    context.translate(word.x, word.y);
-                    context.rotate(word.rotate * Math.PI / 180);
-                    context.font = `${word.size}px Impact`;
-                    context.fillStyle = word.size > (maxFreq / 3) ? colorPalette.strong : colorPalette.light;
-                    context.fillText(word.text, 0, 0);
-                    context.restore();
-                });
-                const dataUrl = canvas.toDataURL();
-                resolve(dataUrl.split(',')[1]);
-            });
-        layout.start();
-    });
+    const options = {
+        list: wordList,
+        gridSize: 4,
+        weightFactor: (size) => Math.pow(size, 1.1) * 20, // Fórmula potente
+        fontFamily: 'Impact, sans-serif',
+        color: (word, weight) => {
+            return weight > (maxWeight / 3) ? colorPalette.strong : colorPalette.light;
+        },
+        rotateRatio: 0.5,
+        rotationSteps: 2,
+        backgroundColor: '#ffffff'
+    };
+    
+    try {
+        WordCloud(canvas, options);
+        const dataURL = canvas.toDataURL();
+        return dataURL.split(',')[1];
+    } catch (e) {
+        console.error("Error al generar la imagen de la nube de palabras:", e);
+        return null;
+    }
 }
 
 const storage = multer.memoryStorage();
