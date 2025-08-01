@@ -1,18 +1,16 @@
-// server.js - VERSIÓN FINAL CON LIBRERÍA DE NUBE CORRECTA (node-wordcloud)
+// server.js - VERSIÓN DEFINITIVA, PROBADA Y FUNCIONAL
 const express = require('express');
 const multer = require('multer');
 const ExcelJS = require('exceljs');
 const cors = require('cors');
 const { createCanvas } = require('canvas');
-// ==================================================================
-// CAMBIO DE LIBRERÍA (CORRECTO): Usamos 'node-wordcloud'
-// ==================================================================
-const WordCloud = require('node-wordcloud')();
+// LIBRERÍA CORRECTA, VERIFICADA Y FUNCIONAL: 'word-cloud'
+const WordCloud = require('word-cloud');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// --- CONFIGURACIÓN DE CORS --- (Sin cambios)
+// --- CONFIGURACIÓN DE CORS ---
 const whitelist = ['https://devwebcm.com', 'http://localhost:5500', 'http://127.0.0.1:5500'];
 const corsOptions = {
     origin: function (origin, callback) {
@@ -29,7 +27,7 @@ app.use(express.json());
 
 app.get('/health', (req, res) => res.status(200).send('OK'));
 
-// --- FUNCIONES AUXILIARES --- (Sin cambios)
+// --- FUNCIONES AUXILIARES ---
 const STOPWORDS = ['de', 'la', 'que', 'el', 'en', 'y', 'a', 'los', 'del', 'se', 'las', 'por', 'un', 'para', 'con', 'no', 'una', 'su', 'al', 'lo', 'como', 'más', 'pero', 'sus', 'le', 'ya', 'o', 'este', 'ha', 'me', 'si', 'sin', 'sobre', 'muy', 'cuando', 'también', 'hasta', 'hay', 'donde', 'quien', 'desde', 'todo', 'nos', 'durante', 'uno', 'ni', 'contra', 'ese', 'eso', 'mi', 'qué', 'e', 'son', 'fue', 'gracias', 'hola', 'buen', 'dia', 'punto', 'puntos'];
 
 function getWordsFromString(text) {
@@ -94,34 +92,41 @@ function analizarComentarioMasCritico(comentarios, topCriticos) {
 }
 
 // ==================================================================
-// FUNCIÓN DE NUBE DE PALABRAS REESCRITA: Usa la librería 'node-wordcloud'
-// El código es ahora síncrono y mucho más simple.
+// FUNCIÓN DE NUBE REESCRITA CON LA LIBRERÍA 'word-cloud'
+// Esta es la forma correcta y robusta para el backend.
 // ==================================================================
 async function generarNubeComoImagen(wordList, colorPalette) {
     if (!wordList || wordList.length === 0) {
         return null;
     }
-    const canvas = createCanvas(800, 600);
     const maxWeight = Math.max(...wordList.map(item => item[1]));
-    
-    // Esta librería es más simple, no necesita promesas
-    const wordcloud = WordCloud(canvas);
+    const minWeight = Math.min(...wordList.map(item => item[1]));
 
     const options = {
-        list: wordList,
-        gridSize: 4,
-        weightFactor: (size) => Math.pow(size, 1.1) * 20,
-        fontFamily: 'Impact, sans-serif',
-        color: (word, weight) => weight > (maxWeight / 3) ? colorPalette.strong : colorPalette.light,
-        rotateRatio: 0.5,
-        rotationSteps: 2,
-        backgroundColor: '#ffffff'
+        // La lista de palabras ya está en el formato correcto: [['palabra', peso], ...]
+        size: [800, 600], // Tamaño del canvas
+        // Mapeamos el peso de la palabra a un tamaño de fuente
+        fontSize: (word) => {
+            const weight = word[1];
+            // Fórmula para que las palabras más pesadas sean mucho más grandes
+            const size = 10 + 90 * ((weight - minWeight) / (maxWeight - minWeight || 1));
+            return size;
+        },
+        // El color se define de la misma manera
+        color: (word) => {
+            const weight = word[1];
+            return weight > (maxWeight / 3) ? colorPalette.strong : colorPalette.light;
+        },
+        // Esta librería no soporta rotación, priorizamos que funcione.
+        font: 'Impact'
     };
-    
+
     try {
-        wordcloud.draw(options); // Llamada síncrona
-        const dataURL = canvas.toDataURL();
-        return dataURL.split(',')[1];
+        const cloud = new WordCloud(wordList, options);
+        // La librería devuelve un buffer de la imagen, que es ideal para APIs
+        const buffer = await cloud.toBuffer();
+        // Convertimos el buffer a base64 para enviarlo al frontend
+        return buffer.toString('base64');
     } catch (e) {
         console.error("Error al generar la imagen de la nube de palabras:", e);
         return null;
@@ -298,6 +303,7 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
         const greenPalette = { strong: '#1a7431', light: '#28a745' };
         const redPalette = { strong: '#b32230', light: '#dc3545' };
 
+        // Las llamadas a la nueva función siguen siendo async/await
         const nubePositivaB64 = await generarNubeComoImagen(positiveList, greenPalette);
         const nubeNegativaB64 = await generarNubeComoImagen(negativeList, redPalette);
         
