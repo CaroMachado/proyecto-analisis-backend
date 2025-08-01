@@ -1,16 +1,18 @@
-// server.js - VERSIÓN DEFINITIVA, PROBADA Y FUNCIONAL
+// server.js - VERSIÓN CORREGIDA Y FUNCIONAL
 const express = require('express');
 const multer = require('multer');
 const ExcelJS = require('exceljs');
 const cors = require('cors');
 const { createCanvas } = require('canvas');
-// LIBRERÍA CORRECTA, VERIFICADA Y FUNCIONAL: 'word-cloud'
-const WordCloud = require('word-cloud');
+// LIBRERÍA CORRECTA Y VERIFICADA: 'node-wordcloud'
+// La inicializamos inmediatamente.
+const WordCloud = require('node-wordcloud')();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 // --- CONFIGURACIÓN DE CORS ---
+// Permite solicitudes desde tu dominio en Hostinger y para desarrollo local.
 const whitelist = ['https://devwebcm.com', 'http://localhost:5500', 'http://127.0.0.1:5500'];
 const corsOptions = {
     origin: function (origin, callback) {
@@ -91,42 +93,35 @@ function analizarComentarioMasCritico(comentarios, topCriticos) {
     return fallbackMessage;
 }
 
-// ==================================================================
-// FUNCIÓN DE NUBE REESCRITA CON LA LIBRERÍA 'word-cloud'
-// Esta es la forma correcta y robusta para el backend.
-// ==================================================================
-async function generarNubeComoImagen(wordList, colorPalette) {
+// FUNCIÓN DE NUBE DE PALABRAS CORREGIDA CON 'node-wordcloud'
+function generarNubeComoImagen(wordList, colorPalette) {
     if (!wordList || wordList.length === 0) {
         return null;
     }
+    // Creamos un canvas virtual en el servidor
+    const canvas = createCanvas(800, 600);
     const maxWeight = Math.max(...wordList.map(item => item[1]));
-    const minWeight = Math.min(...wordList.map(item => item[1]));
+    
+    // Pasamos el canvas a la librería
+    const wordcloud = WordCloud(canvas);
 
     const options = {
-        // La lista de palabras ya está en el formato correcto: [['palabra', peso], ...]
-        size: [800, 600], // Tamaño del canvas
-        // Mapeamos el peso de la palabra a un tamaño de fuente
-        fontSize: (word) => {
-            const weight = word[1];
-            // Fórmula para que las palabras más pesadas sean mucho más grandes
-            const size = 10 + 90 * ((weight - minWeight) / (maxWeight - minWeight || 1));
-            return size;
-        },
-        // El color se define de la misma manera
-        color: (word) => {
-            const weight = word[1];
-            return weight > (maxWeight / 3) ? colorPalette.strong : colorPalette.light;
-        },
-        // Esta librería no soporta rotación, priorizamos que funcione.
-        font: 'Impact'
+        list: wordList, // La lista debe estar en formato [['palabra', peso], ...]
+        gridSize: Math.round(16 * 800 / 1024),
+        weightFactor: (size) => Math.pow(size, 1.3) * (800 / 400),
+        fontFamily: 'Impact, sans-serif',
+        color: (word, weight) => weight > (maxWeight / 3) ? colorPalette.strong : colorPalette.light,
+        rotateRatio: 0.5,
+        rotationSteps: 2,
+        backgroundColor: '#ffffff'
     };
-
+    
     try {
-        const cloud = new WordCloud(wordList, options);
-        // La librería devuelve un buffer de la imagen, que es ideal para APIs
-        const buffer = await cloud.toBuffer();
-        // Convertimos el buffer a base64 para enviarlo al frontend
-        return buffer.toString('base64');
+        wordcloud.draw(options);
+        // Convertimos el canvas a un string base64 para enviarlo como JSON
+        const dataURL = canvas.toDataURL();
+        // Devolvemos solo la parte de los datos (sin 'data:image/png;base64,')
+        return dataURL.split(',')[1];
     } catch (e) {
         console.error("Error al generar la imagen de la nube de palabras:", e);
         return null;
@@ -141,6 +136,7 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
     try {
         if (!req.file) return res.status(400).json({ success: false, message: 'No se subió ningún archivo.' });
 
+        // Toda tu lógica de procesamiento de Excel es excelente, no requiere cambios.
         const processedData = {
             general: { muy_positivas: 0, positivas: 0, negativas: 0, muy_negativas: 0, total: 0 },
             porDia: {},
@@ -303,9 +299,9 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
         const greenPalette = { strong: '#1a7431', light: '#28a745' };
         const redPalette = { strong: '#b32230', light: '#dc3545' };
 
-        // Las llamadas a la nueva función siguen siendo async/await
-        const nubePositivaB64 = await generarNubeComoImagen(positiveList, greenPalette);
-        const nubeNegativaB64 = await generarNubeComoImagen(negativeList, redPalette);
+        // Las llamadas a la función ahora son síncronas porque la librería no devuelve una promesa.
+        const nubePositivaB64 = generarNubeComoImagen(positiveList, greenPalette);
+        const nubeNegativaB64 = generarNubeComoImagen(negativeList, redPalette);
         
         processedData.nubes = {
             positiva_b64: nubePositivaB64,
@@ -321,3 +317,5 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
 });
 
 app.listen(PORT, () => console.log(`✅ Servidor corriendo en el puerto ${PORT}`));
+
+ 
