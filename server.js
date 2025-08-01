@@ -1,16 +1,19 @@
-// server.js - VERSIÓN FINAL CORREGIDA
+// server.js - VERSIÓN FINAL CON LIBRERÍA DE NUBE FIABLE (canvas-wordcloud)
 const express = require('express');
 const multer = require('multer');
 const ExcelJS = require('exceljs');
 const cors = require('cors');
 const { createCanvas } = require('canvas');
-const WordCloud = require('wordcloud');
+// ==================================================================
+// CAMBIO DE LIBRERÍA: Usamos 'canvas-wordcloud' que sí funciona en Node.js
+// ==================================================================
+const WordCloud = require('canvas-wordcloud').WordCloud;
+
 
 const app = express();
-// Render usa la variable PORT, si no, usa 3000 para desarrollo local.
-const PORT = process.env.PORT || 3000; 
+const PORT = process.env.PORT || 3000;
 
-// --- CONFIGURACIÓN DE CORS --- (Sin cambios, está bien)
+// --- CONFIGURACIÓN DE CORS ---
 const whitelist = ['https://devwebcm.com', 'http://localhost:5500', 'http://127.0.0.1:5500'];
 const corsOptions = {
     origin: function (origin, callback) {
@@ -27,7 +30,7 @@ app.use(express.json());
 
 app.get('/health', (req, res) => res.status(200).send('OK'));
 
-// --- FUNCIONES AUXILIARES ---
+// --- FUNCIONES AUXILIARES --- (Sin cambios)
 const STOPWORDS = ['de', 'la', 'que', 'el', 'en', 'y', 'a', 'los', 'del', 'se', 'las', 'por', 'un', 'para', 'con', 'no', 'una', 'su', 'al', 'lo', 'como', 'más', 'pero', 'sus', 'le', 'ya', 'o', 'este', 'ha', 'me', 'si', 'sin', 'sobre', 'muy', 'cuando', 'también', 'hasta', 'hay', 'donde', 'quien', 'desde', 'todo', 'nos', 'durante', 'uno', 'ni', 'contra', 'ese', 'eso', 'mi', 'qué', 'e', 'son', 'fue', 'gracias', 'hola', 'buen', 'dia', 'punto', 'puntos'];
 
 function getWordsFromString(text) {
@@ -64,57 +67,36 @@ function parseDateTime(fechaCell, horaCell) {
     } catch { return null; }
 }
 
-// ==================================================================
-// FUNCIÓN DE "IA" MEJORADA: Más inteligente, sin dependencias externas
-// ==================================================================
 function analizarComentarioMasCritico(comentarios, topCriticos) {
     const fallbackMessage = "No se encontraron comentarios negativos específicos para analizar.";
-    if (!comentarios || comentarios.length === 0) {
-        return fallbackMessage;
-    }
-
+    if (!comentarios || comentarios.length === 0) return fallbackMessage;
     let comentarioRepresentativo = "";
     let mejorPuntuacion = -1;
-
-    // Los "puntos críticos" son las palabras clave más importantes que buscamos
     const palabrasClaveCriticas = topCriticos.toLowerCase().split(', ').filter(Boolean);
-
     for (const comentario of comentarios) {
         let puntuacionActual = 0;
         const comentarioLower = comentario.toLowerCase();
-
-        // Puntuación base por longitud (los comentarios más largos son más valiosos)
-        puntuacionActual += comentario.length / 50; // 1 punto por cada 50 caracteres
-
-        // Puntuación extra si contiene una palabra clave crítica
+        puntuacionActual += comentario.length / 50;
         for (const clave of palabrasClaveCriticas) {
-            if (comentarioLower.includes(clave)) {
-                puntuacionActual += 5; // Bonus alto por mencionar un problema conocido
-            }
+            if (comentarioLower.includes(clave)) puntuacionActual += 5;
         }
-        
         if (puntuacionActual > mejorPuntuacion) {
             mejorPuntuacion = puntuacionActual;
             comentarioRepresentativo = comentario;
         }
     }
-
     if (comentarioRepresentativo) {
         return `<strong>Análisis de un comentario representativo:</strong><br>"<em>${comentarioRepresentativo}</em>"`;
     } else {
-        // Si no encontramos nada, devolvemos el comentario más largo como fallback
         const comentarioMasLargo = comentarios.reduce((a, b) => a.length > b.length ? a : b, "");
-        if (comentarioMasLargo) {
-             return `<strong>Análisis de un comentario representativo:</strong><br>"<em>${comentarioMasLargo}</em>"`;
-        }
+        if (comentarioMasLargo) return `<strong>Análisis de un comentario representativo:</strong><br>"<em>${comentarioMasLargo}</em>"`;
     }
-    
     return fallbackMessage;
 }
 
-
 // ==================================================================
-// FUNCIÓN DE NUBE DE PALABRAS CORREGIDA: Usa Promise y espera el evento 'stop'
+// FUNCIÓN DE NUBE DE PALABRAS REESCRITA: Usa la nueva librería 'canvas-wordcloud'
+// El código es ahora más simple y fiable.
 // ==================================================================
 async function generarNubeComoImagen(wordList, colorPalette) {
     if (!wordList || wordList.length === 0) {
@@ -123,45 +105,27 @@ async function generarNubeComoImagen(wordList, colorPalette) {
     const canvas = createCanvas(800, 600);
     const maxWeight = Math.max(...wordList.map(item => item[1]));
 
-    // Envolvemos la llamada a WordCloud en una Promise
-    return new Promise((resolve, reject) => {
-        const options = {
-            list: wordList,
-            gridSize: 4,
-            weightFactor: (size) => Math.pow(size, 1.1) * 20,
-            fontFamily: 'Impact, sans-serif',
-            color: (word, weight) => {
-                return weight > (maxWeight / 3) ? colorPalette.strong : colorPalette.light;
-            },
-            rotateRatio: 0.5,
-            rotationSteps: 2,
-            backgroundColor: '#ffffff',
-            // ¡ESTA ES LA CLAVE! Se ejecuta cuando la nube está dibujada.
-            stop: () => {
-                try {
-                    const dataURL = canvas.toDataURL();
-                    // Resolvemos la promesa con la imagen en base64
-                    resolve(dataURL.split(',')[1]); 
-                } catch (e) {
-                    console.error("Error al convertir el canvas a DataURL:", e);
-                    reject(e);
-                }
-            },
-            // Maneja el caso en que la librería no pueda colocar las palabras
-            abort: () => {
-                reject(new Error("WordCloud no pudo colocar las palabras."));
-            }
-        };
+    const options = {
+        list: wordList,
+        gridSize: 4,
+        weightFactor: (size) => Math.pow(size, 1.1) * 20,
+        fontFamily: 'Impact, sans-serif',
+        color: (word, weight) => weight > (maxWeight / 3) ? colorPalette.strong : colorPalette.light,
+        rotateRatio: 0.5,
+        rotationSteps: 2,
+        backgroundColor: '#ffffff'
+    };
 
-        try {
-            // Iniciamos el proceso de dibujo
-            WordCloud(canvas, options);
-        } catch (e) {
-            // Captura errores de configuración iniciales
-            console.error("Error al iniciar WordCloud:", e);
-            reject(e);
-        }
-    });
+    try {
+        // La nueva librería tiene un constructor y un método .generate() que devuelve una promesa
+        const wordcloud = new WordCloud(canvas, options);
+        await wordcloud.generate(); // Esperamos a que la generación termine
+        const dataURL = canvas.toDataURL();
+        return dataURL.split(',')[1];
+    } catch (e) {
+        console.error("Error al generar la imagen de la nube de palabras:", e);
+        return null;
+    }
 }
 
 
@@ -237,11 +201,9 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
                 if (puntoCritico) dailyDetails[diaSemana].sectores[sectorKey].criticos[puntoCritico] = (dailyDetails[diaSemana].sectores[sectorKey].criticos[puntoCritico] || 0) + 1;
                 if (puntoDestacado) dailyDetails[diaSemana].sectores[sectorKey].destacados[puntoDestacado] = (dailyDetails[diaSemana].sectores[sectorKey].destacados[puntoDestacado] || 0) + 1;
                 
-                // Solo guardar comentarios negativos para el análisis
                 if (calificacionDesc === 'Negativa' || calificacionDesc === 'Muy Negativa') {
                     if (comentario) dailyDetails[diaSemana].sectores[sectorKey].comentarios.push(comentario);
                 }
-
 
                 switch (calificacionDesc) {
                     case 'Muy Positiva':
@@ -290,13 +252,9 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
 
         for (const dia in processedData.porDia) {
             let sectorMasCritico = { nombre: 'N/A', satisfaccion: 101, criticos: 'N/A', total: 0, comentarios: [] };
-            let todosLosComentariosNegativosDelDia = [];
             
             if (processedData.porDia[dia].sectoresDelDia) {
                  processedData.porDia[dia].sectoresDelDia.forEach(({ nombre, stats }) => {
-                    // Acumulamos todos los comentarios negativos del día
-                    todosLosComentariosNegativosDelDia.push(...stats.comentarios);
-
                     if (stats.total < 3) return;
                     if (stats.satisfaccion < sectorMasCritico.satisfaccion) {
                         sectorMasCritico = {
@@ -304,16 +262,13 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
                             satisfaccion: stats.satisfaccion,
                             criticos: getTopItems(stats.criticos, 3) || 'comentarios generales',
                             total: stats.total,
-                            comentarios: stats.comentarios // Guardamos solo los de este sector para contexto
+                            comentarios: stats.comentarios
                         };
                     }
                 });
             }
             
             const picoPositivo = dailyDetails[dia].valoracionesPorHora.reduce((p, c, i) => c.muy_positivas > p.count ? { hora: i, count: c.muy_positivas } : p, { hora: -1, count: -1 });
-            
-            // LLAMAMOS A LA NUEVA FUNCIÓN DE "IA"
-            // Le pasamos los comentarios del sector más crítico Y los temas críticos de ese sector
             const conclusionIA = analizarComentarioMasCritico(sectorMasCritico.comentarios, sectorMasCritico.criticos);
 
             processedData.porDia[dia].analisis = {
@@ -343,7 +298,6 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
         const greenPalette = { strong: '#1a7431', light: '#28a745' };
         const redPalette = { strong: '#b32230', light: '#dc3545' };
 
-        // Las llamadas ahora esperan a que la promesa se resuelva
         const nubePositivaB64 = await generarNubeComoImagen(positiveList, greenPalette);
         const nubeNegativaB64 = await generarNubeComoImagen(negativeList, redPalette);
         
@@ -355,7 +309,6 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
         res.json({ success: true, data: processedData });
 
     } catch (error) {
-        // Un log más detallado para depuración en Render
         console.error('Error fatal al procesar el archivo:', error.stack || error);
         res.status(500).json({ success: false, message: 'Hubo un error crítico al procesar el archivo Excel.' });
     }
