@@ -1,4 +1,4 @@
-// server.js - VERSIÓN FINAL USANDO d3-cloud y canvas directamente
+// server.js - VERSIÓN CORREGIDA CON CÁLCULO DE NPS A 1 DECIMAL
 const express = require('express');
 const multer = require('multer');
 const ExcelJS = require('exceljs');
@@ -26,91 +26,49 @@ app.use(express.json());
 
 app.get('/health', (req, res) => res.status(200).send('OK'));
 
-// --- FUNCIONES AUXILIARES (Sin cambios) ---
+// --- FUNCIONES AUXILIARES ---
 const STOPWORDS = ['de', 'la', 'que', 'el', 'en', 'y', 'a', 'los', 'del', 'se', 'las', 'por', 'un', 'para', 'con', 'no', 'una', 'su', 'al', 'lo', 'como', 'más', 'pero', 'sus', 'le', 'ya', 'o', 'este', 'ha', 'me', 'si', 'sin', 'sobre', 'muy', 'cuando', 'también', 'hasta', 'hay', 'donde', 'quien', 'desde', 'todo', 'nos', 'durante', 'uno', 'ni', 'contra', 'ese', 'eso', 'mi', 'qué', 'e', 'son', 'fue', 'gracias', 'hola', 'buen', 'dia', 'punto', 'puntos'];
+
 function getWordsFromString(text) { if (!text || typeof text !== 'string') return []; return text.toLowerCase().match(/\b(\w+)\b/g)?.filter(word => !STOPWORDS.includes(word) && word.length > 2) || []; }
-function calculateSatisfaction(stats) { if (!stats || stats.total === 0) return 0; const promotores = stats.muy_positivas || 0; const detractores = (stats.negativas || 0) + (stats.muy_negativas || 0); const indice = ((promotores / stats.total) - (detractores / stats.total)) * 100; return Math.round(indice); }
+
+// *** CAMBIO 1: Mostrar un decimal en el cálculo. ***
+function calculateSatisfaction(stats) {
+    if (!stats || stats.total === 0) return 0;
+    const promotores = stats.muy_positivas || 0;
+    const detractores = (stats.negativas || 0) + (stats.muy_negativas || 0);
+    const indice = ((promotores / stats.total) - (detractores / stats.total)) * 100;
+    // Se cambia Math.round(indice) por esto para obtener un decimal:
+    return parseFloat(indice.toFixed(1));
+}
+
 function parseDateTime(fechaCell, horaCell) { try { if (!fechaCell || !horaCell) return null; let baseDate = fechaCell instanceof Date ? fechaCell : new Date(fechaCell); if (isNaN(baseDate.getTime())) return null; let hours = 0, minutes = 0; if (horaCell instanceof Date) { hours = horaCell.getUTCHours(); minutes = horaCell.getUTCMinutes(); } else if (typeof horaCell === 'number') { const totalSecondsInDay = horaCell * 86400; hours = Math.floor(totalSecondsInDay / 3600) % 24; minutes = Math.floor((totalSecondsInDay % 3600) / 60); } else if (typeof horaCell === 'string') { const parts = horaCell.split(':'); hours = parseInt(parts[0], 10) || 0; minutes = parseInt(parts[1], 10) || 0; } else { return null; } const finalDate = new Date(Date.UTC(baseDate.getUTCFullYear(), baseDate.getUTCMonth(), baseDate.getUTCDate(), hours, minutes)); return isNaN(finalDate.getTime()) ? null : finalDate; } catch { return null; } }
 function analizarComentarioMasCritico(comentarios, topCriticos) { const fallbackMessage = "No se encontraron comentarios negativos específicos para analizar."; if (!comentarios || comentarios.length === 0) return fallbackMessage; let comentarioRepresentativo = ""; let mejorPuntuacion = -1; const palabrasClaveCriticas = topCriticos.toLowerCase().split(', ').filter(Boolean); for (const comentario of comentarios) { let puntuacionActual = 0; const comentarioLower = comentario.toLowerCase(); puntuacionActual += comentario.length / 50; for (const clave of palabrasClaveCriticas) { if (comentarioLower.includes(clave)) puntuacionActual += 5; } if (puntuacionActual > mejorPuntuacion) { mejorPuntuacion = puntuacionActual; comentarioRepresentativo = comentario; } } if (comentarioRepresentativo) { return `<strong>Análisis de un comentario representativo:</strong><br>"<em>${comentarioRepresentativo}</em>"`; } else { const comentarioMasLargo = comentarios.reduce((a, b) => a.length > b.length ? a : b, ""); if (comentarioMasLargo) return `<strong>Análisis de un comentario representativo:</strong><br>"<em>${comentarioMasLargo}</em>"`; } return fallbackMessage; }
 
-
-// ==================================================================
-// FUNCIÓN DE NUBE REESCRITA CON d3-cloud y canvas
-// ==================================================================
 function generarNubeComoImagen(wordList, colorPalette) {
-    if (!wordList || wordList.length === 0) {
-        return Promise.resolve(null);
-    }
-    
+    if (!wordList || wordList.length === 0) { return Promise.resolve(null); }
     return new Promise(resolve => {
         const canvas = createCanvas(800, 600);
         const ctx = canvas.getContext('2d');
         const maxWeight = Math.max(...wordList.map(item => item[1]));
         const minWeight = Math.min(...wordList.map(item => item[1]));
-        
-        const words = wordList.map(item => ({
-            text: item[0],
-            size: 10 + 90 * ((item[1] - minWeight) / (maxWeight - minWeight || 1)),
-            color: item[1] > (maxWeight / 3) ? colorPalette.strong : colorPalette.light
-        }));
-
-        const layout = d3Cloud()
-            .size([800, 600])
-            .canvas(() => createCanvas(1, 1))
-            .words(words)
-            .padding(5)
-            .rotate(() => (Math.random() > 0.5) ? 0 : 90)
-            // *** CAMBIO CLAVE: Usar una fuente segura disponible en el servidor ***
-            .font('DejaVu Sans')
-            .fontSize(d => d.size)
+        const words = wordList.map(item => ({ text: item[0], size: 10 + 90 * ((item[1] - minWeight) / (maxWeight - minWeight || 1)), color: item[1] > (maxWeight / 3) ? colorPalette.strong : colorPalette.light }));
+        const layout = d3Cloud().size([800, 600]).canvas(() => createCanvas(1, 1)).words(words).padding(5).rotate(() => (Math.random() > 0.5) ? 0 : 90).font('DejaVu Sans').fontSize(d => d.size)
             .on('end', (words) => {
-                ctx.fillStyle = '#fff';
-                ctx.fillRect(0, 0, 800, 600);
-                
-                ctx.save();
-                ctx.translate(400, 300);
-                words.forEach(word => {
-                    ctx.save();
-                    ctx.translate(word.x, word.y);
-                    ctx.rotate(word.rotate * Math.PI / 180);
-                    ctx.font = `${word.size}px ${word.font}`;
-                    ctx.fillStyle = word.color;
-                    ctx.textAlign = 'center';
-                    ctx.textBaseline = 'middle';
-                    ctx.fillText(word.text, 0, 0);
-                    ctx.restore();
-                });
-                ctx.restore();
-                
-                resolve(canvas.toDataURL().split(',')[1]);
+                ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, 800, 600); ctx.save(); ctx.translate(400, 300);
+                words.forEach(word => { ctx.save(); ctx.translate(word.x, word.y); ctx.rotate(word.rotate * Math.PI / 180); ctx.font = `${word.size}px ${word.font}`; ctx.fillStyle = word.color; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(word.text, 0, 0); ctx.restore(); });
+                ctx.restore(); resolve(canvas.toDataURL().split(',')[1]);
             });
-
         layout.start();
     });
 }
-
-
 const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
-
 app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
     try {
         if (!req.file) return res.status(400).json({ success: false, message: 'No se subió ningún archivo.' });
-        
-        const processedData = {
-            general: { muy_positivas: 0, positivas: 0, negativas: 0, muy_negativas: 0, total: 0 },
-            porDia: {},
-            porHora: Array.from({ length: 24 }, () => ({ muy_positivas: 0, positivas: 0, negativas: 0, muy_negativas: 0, total: 0 })),
-            porSector: {},
-            nubes: { positiva: [], negativa: [] },
-            fechas: [],
-        };
-        const dailyDetails = {};
-        const DIAS_SEMANA = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
-        const workbook = new ExcelJS.Workbook();
-        await workbook.xlsx.load(req.file.buffer);
-        const worksheet = workbook.worksheets[0];
-        let columnMap = {};
+        const processedData = { general: { muy_positivas: 0, positivas: 0, negativas: 0, muy_negativas: 0, total: 0 }, porDia: {}, porHora: Array.from({ length: 24 }, () => ({ muy_positivas: 0, positivas: 0, negativas: 0, muy_negativas: 0, total: 0 })), porSector: {}, nubes: { positiva: [], negativa: [] }, fechas: [], };
+        const dailyDetails = {}; const DIAS_SEMANA = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+        const workbook = new ExcelJS.Workbook(); await workbook.xlsx.load(req.file.buffer); const worksheet = workbook.worksheets[0]; let columnMap = {};
         worksheet.getRow(1).eachCell((cell, colNumber) => { if (cell.value) columnMap[cell.value.toString().toLowerCase().trim().replace(/ /g, '_')] = colNumber; });
         const requiredColumns = ['fecha', 'hora', 'sector', 'ubicacion', 'calificacion_descripcion'];
         for (const col of requiredColumns) { if (!columnMap[col]) return res.status(400).json({ success: false, message: `El archivo Excel no contiene la columna requerida: "${col}"` }); }
@@ -125,28 +83,18 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
         for (const dia in processedData.porDia) processedData.porDia[dia].satisfaccion = calculateSatisfaction(processedData.porDia[dia]);
         processedData.porHora.forEach(hora => hora.satisfaccion = calculateSatisfaction(hora));
         for (const sector in processedData.porSector) processedData.porSector[sector].satisfaccion = calculateSatisfaction(processedData.porSector[sector]);
-        
         const countWords = (arr) => arr.reduce((acc, w) => { acc[w] = (acc[w] || 0) + 1; return acc; }, {});
         let positiveList = Object.entries(countWords(processedData.nubes.positiva)).sort((a, b) => b[1] - a[1]).slice(0, 50);
         let negativeList = Object.entries(countWords(processedData.nubes.negativa)).sort((a, b) => b[1] - a[1]).slice(0, 50);
-        
-        const greenPalette = { strong: '#1a7431', light: '#28a745' };
-        const redPalette = { strong: '#b32230', light: '#dc3545' };
-
+        const greenPalette = { strong: '#43a047', light: '#7cb342' };
+        const redPalette = { strong: '#d32f2f', light: '#fb8c00' };
         const nubePositivaB64 = await generarNubeComoImagen(positiveList, greenPalette);
         const nubeNegativaB64 = await generarNubeComoImagen(negativeList, redPalette);
-        
-        processedData.nubes = {
-            positiva_b64: nubePositivaB64,
-            negativa_b64: nubeNegativaB64
-        };
-        
+        processedData.nubes = { positiva_b64: nubePositivaB64, negativa_b64: nubeNegativaB64 };
         res.json({ success: true, data: processedData });
-
     } catch (error) {
         console.error('Error fatal al procesar el archivo:', error.stack || error);
         res.status(500).json({ success: false, message: 'Hubo un error crítico al procesar el archivo Excel.' });
     }
 });
-
 app.listen(PORT, () => console.log(`✅ Servidor corriendo en el puerto ${PORT}`));
