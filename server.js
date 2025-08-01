@@ -1,19 +1,18 @@
-// server.js - VERSIÓN FINAL CON LIBRERÍA DE NUBE FIABLE (canvas-wordcloud)
+// server.js - VERSIÓN FINAL CON LIBRERÍA DE NUBE CORRECTA (node-wordcloud)
 const express = require('express');
 const multer = require('multer');
 const ExcelJS = require('exceljs');
 const cors = require('cors');
 const { createCanvas } = require('canvas');
 // ==================================================================
-// CAMBIO DE LIBRERÍA: Usamos 'canvas-wordcloud' que sí funciona en Node.js
+// CAMBIO DE LIBRERÍA (CORRECTO): Usamos 'node-wordcloud'
 // ==================================================================
-const WordCloud = require('canvas-wordcloud').WordCloud;
-
+const WordCloud = require('node-wordcloud')();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// --- CONFIGURACIÓN DE CORS ---
+// --- CONFIGURACIÓN DE CORS --- (Sin cambios)
 const whitelist = ['https://devwebcm.com', 'http://localhost:5500', 'http://127.0.0.1:5500'];
 const corsOptions = {
     origin: function (origin, callback) {
@@ -95,8 +94,8 @@ function analizarComentarioMasCritico(comentarios, topCriticos) {
 }
 
 // ==================================================================
-// FUNCIÓN DE NUBE DE PALABRAS REESCRITA: Usa la nueva librería 'canvas-wordcloud'
-// El código es ahora más simple y fiable.
+// FUNCIÓN DE NUBE DE PALABRAS REESCRITA: Usa la librería 'node-wordcloud'
+// El código es ahora síncrono y mucho más simple.
 // ==================================================================
 async function generarNubeComoImagen(wordList, colorPalette) {
     if (!wordList || wordList.length === 0) {
@@ -104,6 +103,9 @@ async function generarNubeComoImagen(wordList, colorPalette) {
     }
     const canvas = createCanvas(800, 600);
     const maxWeight = Math.max(...wordList.map(item => item[1]));
+    
+    // Esta librería es más simple, no necesita promesas
+    const wordcloud = WordCloud(canvas);
 
     const options = {
         list: wordList,
@@ -115,11 +117,9 @@ async function generarNubeComoImagen(wordList, colorPalette) {
         rotationSteps: 2,
         backgroundColor: '#ffffff'
     };
-
+    
     try {
-        // La nueva librería tiene un constructor y un método .generate() que devuelve una promesa
-        const wordcloud = new WordCloud(canvas, options);
-        await wordcloud.generate(); // Esperamos a que la generación termine
+        wordcloud.draw(options); // Llamada síncrona
         const dataURL = canvas.toDataURL();
         return dataURL.split(',')[1];
     } catch (e) {
