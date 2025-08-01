@@ -1,11 +1,13 @@
-// server.js - VERSIÓN DEFINITIVA CON LA LIBRERÍA 'wordcloud'
+// server.js - VERSIÓN FINAL CON LA LIBRERÍA CORRECTA 'word-cloud'
 const express = require('express');
 const multer = require('multer');
 const ExcelJS = require('exceljs');
 const cors = require('cors');
-const { createCanvas } = require('canvas');
-// LIBRERÍA CORRECTA, ESTÁNDAR Y FUNCIONAL: 'wordcloud'
-const WordCloud = require('wordcloud');
+// La librería canvas es necesaria pero no se llama directamente en nuestro código,
+// la usa 'word-cloud' por debajo.
+const { createCanvas } = require('canvas'); 
+// ESTA ES LA LIBRERÍA CORRECTA PARA NODE.JS
+const WordCloud = require('word-cloud');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -27,12 +29,14 @@ app.use(express.json());
 
 app.get('/health', (req, res) => res.status(200).send('OK'));
 
-// --- FUNCIONES AUXILIARES (Sin cambios) ---
+// --- FUNCIONES AUXILIARES ---
 const STOPWORDS = ['de', 'la', 'que', 'el', 'en', 'y', 'a', 'los', 'del', 'se', 'las', 'por', 'un', 'para', 'con', 'no', 'una', 'su', 'al', 'lo', 'como', 'más', 'pero', 'sus', 'le', 'ya', 'o', 'este', 'ha', 'me', 'si', 'sin', 'sobre', 'muy', 'cuando', 'también', 'hasta', 'hay', 'donde', 'quien', 'desde', 'todo', 'nos', 'durante', 'uno', 'ni', 'contra', 'ese', 'eso', 'mi', 'qué', 'e', 'son', 'fue', 'gracias', 'hola', 'buen', 'dia', 'punto', 'puntos'];
+
 function getWordsFromString(text) {
     if (!text || typeof text !== 'string') return [];
     return text.toLowerCase().match(/\b(\w+)\b/g)?.filter(word => !STOPWORDS.includes(word) && word.length > 2) || [];
 }
+
 function calculateSatisfaction(stats) {
     if (!stats || stats.total === 0) return 0;
     const promotores = stats.muy_positivas || 0;
@@ -40,6 +44,7 @@ function calculateSatisfaction(stats) {
     const indice = ((promotores / stats.total) - (detractores / stats.total)) * 100;
     return Math.round(indice);
 }
+
 function parseDateTime(fechaCell, horaCell) {
     try {
         if (!fechaCell || !horaCell) return null;
@@ -60,6 +65,7 @@ function parseDateTime(fechaCell, horaCell) {
         return isNaN(finalDate.getTime()) ? null : finalDate;
     } catch { return null; }
 }
+
 function analizarComentarioMasCritico(comentarios, topCriticos) {
     const fallbackMessage = "No se encontraron comentarios negativos específicos para analizar.";
     if (!comentarios || comentarios.length === 0) return fallbackMessage;
@@ -86,32 +92,40 @@ function analizarComentarioMasCritico(comentarios, topCriticos) {
     }
     return fallbackMessage;
 }
+
 // ==================================================================
-// FUNCIÓN DE NUBE REESCRITA CON LA LIBRERÍA 'wordcloud'
+// FUNCIÓN DE NUBE REESCRITA CON LA LIBRERÍA 'word-cloud'
+// Esta función es asíncrona y devuelve un buffer, ideal para el backend.
 // ==================================================================
-function generarNubeComoImagen(wordList, colorPalette) {
+async function generarNubeComoImagen(wordList, colorPalette) {
     if (!wordList || wordList.length === 0) {
         return null;
     }
-    const canvas = createCanvas(800, 600);
     const maxWeight = Math.max(...wordList.map(item => item[1]));
+    const minWeight = Math.min(...wordList.map(item => item[1]));
 
     const options = {
-        list: wordList,
-        gridSize: Math.round(16 * 800 / 1024),
-        weightFactor: (size) => Math.pow(size, 1.5) * (800 / 400),
-        fontFamily: 'Impact, sans-serif',
-        color: (word, weight) => weight > (maxWeight / 3) ? colorPalette.strong : colorPalette.light,
-        rotateRatio: 0.5,
-        rotationSteps: 2,
-        backgroundColor: '#ffffff'
+        size: [800, 600],
+        fontSize: (word) => {
+            const weight = word[1];
+            // Fórmula para que las palabras más pesadas sean mucho más grandes
+            const size = 10 + 90 * ((weight - minWeight) / (maxWeight - minWeight || 1));
+            return size;
+        },
+        color: (word) => {
+            const weight = word[1];
+            return weight > (maxWeight / 3) ? colorPalette.strong : colorPalette.light;
+        },
+        rotate: () => (Math.random() > 0.5) ? 0 : 90,
+        font: 'Impact'
     };
 
     try {
-        // La librería dibuja directamente sobre el canvas que le pasamos
-        WordCloud(canvas, options);
-        // Devolvemos el resultado como base64
-        return canvas.toDataURL().split(',')[1];
+        const cloud = new WordCloud(wordList, options);
+        // El método .toBuffer() es asíncrono y específico de Node.js
+        const buffer = await cloud.toBuffer();
+        // Convertimos el buffer a base64 para enviarlo como JSON
+        return buffer.toString('base64');
     } catch (e) {
         console.error("Error al generar la imagen de la nube de palabras:", e);
         return null;
@@ -122,7 +136,6 @@ function generarNubeComoImagen(wordList, colorPalette) {
 const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
 
-// RUTA PRINCIPAL (Sin cambios en su lógica interna)
 app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
     try {
         if (!req.file) return res.status(400).json({ success: false, message: 'No se subió ningún archivo.' });
@@ -289,8 +302,9 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
         const greenPalette = { strong: '#1a7431', light: '#28a745' };
         const redPalette = { strong: '#b32230', light: '#dc3545' };
 
-        const nubePositivaB64 = generarNubeComoImagen(positiveList, greenPalette);
-        const nubeNegativaB64 = generarNubeComoImagen(negativeList, redPalette);
+        // Las llamadas a la función ahora deben ser asíncronas con 'await'
+        const nubePositivaB64 = await generarNubeComoImagen(positiveList, greenPalette);
+        const nubeNegativaB64 = await generarNubeComoImagen(negativeList, redPalette);
         
         processedData.nubes = {
             positiva_b64: nubePositivaB64,
@@ -306,4 +320,3 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
 });
 
 app.listen(PORT, () => console.log(`✅ Servidor corriendo en el puerto ${PORT}`));
- 
