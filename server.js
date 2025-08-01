@@ -1,10 +1,9 @@
- // server.js - VERSIÓN FINAL USANDO d3-cloud y canvas directamente
+// server.js - VERSIÓN FINAL USANDO d3-cloud y canvas directamente
 const express = require('express');
 const multer = require('multer');
 const ExcelJS = require('exceljs');
 const cors = require('cors');
 const { createCanvas } = require('canvas');
-// LIBRERÍA ESTÁNDAR PARA EL CÁLCULO DE POSICIONES: d3-cloud
 const d3Cloud = require('d3-cloud');
 
 const app = express();
@@ -37,21 +36,18 @@ function analizarComentarioMasCritico(comentarios, topCriticos) { const fallback
 
 // ==================================================================
 // FUNCIÓN DE NUBE REESCRITA CON d3-cloud y canvas
-// Esta es la forma robusta y correcta de hacerlo en Node.js
 // ==================================================================
 function generarNubeComoImagen(wordList, colorPalette) {
     if (!wordList || wordList.length === 0) {
         return Promise.resolve(null);
     }
     
-    // Devuelve una promesa porque el cálculo de la nube es asíncrono
     return new Promise(resolve => {
         const canvas = createCanvas(800, 600);
         const ctx = canvas.getContext('2d');
         const maxWeight = Math.max(...wordList.map(item => item[1]));
         const minWeight = Math.min(...wordList.map(item => item[1]));
         
-        // Formateamos la lista para d3-cloud
         const words = wordList.map(item => ({
             text: item[0],
             size: 10 + 90 * ((item[1] - minWeight) / (maxWeight - minWeight || 1)),
@@ -60,19 +56,19 @@ function generarNubeComoImagen(wordList, colorPalette) {
 
         const layout = d3Cloud()
             .size([800, 600])
-            .canvas(() => createCanvas(1, 1)) // d3-cloud necesita un canvas dummy
+            .canvas(() => createCanvas(1, 1))
             .words(words)
             .padding(5)
             .rotate(() => (Math.random() > 0.5) ? 0 : 90)
-            .font('Impact')
+            // *** CAMBIO CLAVE: Usar una fuente segura disponible en el servidor ***
+            .font('DejaVu Sans')
             .fontSize(d => d.size)
             .on('end', (words) => {
-                // Una vez que d3-cloud calcula las posiciones, las dibujamos
-                ctx.fillStyle = '#fff'; // Fondo blanco
+                ctx.fillStyle = '#fff';
                 ctx.fillRect(0, 0, 800, 600);
                 
                 ctx.save();
-                ctx.translate(400, 300); // Mover el origen al centro
+                ctx.translate(400, 300);
                 words.forEach(word => {
                     ctx.save();
                     ctx.translate(word.x, word.y);
@@ -86,7 +82,6 @@ function generarNubeComoImagen(wordList, colorPalette) {
                 });
                 ctx.restore();
                 
-                // Resolvemos la promesa con la imagen en base64
                 resolve(canvas.toDataURL().split(',')[1]);
             });
 
@@ -102,7 +97,6 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
     try {
         if (!req.file) return res.status(400).json({ success: false, message: 'No se subió ningún archivo.' });
         
-        // ... TODA TU LÓGICA DE PROCESAMIENTO, QUE ESTÁ PERFECTA, SIGUE AQUÍ ...
         const processedData = {
             general: { muy_positivas: 0, positivas: 0, negativas: 0, muy_negativas: 0, total: 0 },
             porDia: {},
@@ -139,7 +133,6 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
         const greenPalette = { strong: '#1a7431', light: '#28a745' };
         const redPalette = { strong: '#b32230', light: '#dc3545' };
 
-        // La nueva función devuelve una promesa, por lo que 'await' funciona perfectamente.
         const nubePositivaB64 = await generarNubeComoImagen(positiveList, greenPalette);
         const nubeNegativaB64 = await generarNubeComoImagen(negativeList, redPalette);
         
