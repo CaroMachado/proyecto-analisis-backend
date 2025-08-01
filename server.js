@@ -1,18 +1,16 @@
-// server.js - VERSIÓN CORREGIDA Y FUNCIONAL
+// server.js - VERSIÓN DEFINITIVA CON LA LIBRERÍA 'wordcloud'
 const express = require('express');
 const multer = require('multer');
 const ExcelJS = require('exceljs');
 const cors = require('cors');
 const { createCanvas } = require('canvas');
-// LIBRERÍA CORRECTA Y VERIFICADA: 'node-wordcloud'
-// La inicializamos inmediatamente.
-const WordCloud = require('node-wordcloud')();
+// LIBRERÍA CORRECTA, ESTÁNDAR Y FUNCIONAL: 'wordcloud'
+const WordCloud = require('wordcloud');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 // --- CONFIGURACIÓN DE CORS ---
-// Permite solicitudes desde tu dominio en Hostinger y para desarrollo local.
 const whitelist = ['https://devwebcm.com', 'http://localhost:5500', 'http://127.0.0.1:5500'];
 const corsOptions = {
     origin: function (origin, callback) {
@@ -29,14 +27,12 @@ app.use(express.json());
 
 app.get('/health', (req, res) => res.status(200).send('OK'));
 
-// --- FUNCIONES AUXILIARES ---
+// --- FUNCIONES AUXILIARES (Sin cambios) ---
 const STOPWORDS = ['de', 'la', 'que', 'el', 'en', 'y', 'a', 'los', 'del', 'se', 'las', 'por', 'un', 'para', 'con', 'no', 'una', 'su', 'al', 'lo', 'como', 'más', 'pero', 'sus', 'le', 'ya', 'o', 'este', 'ha', 'me', 'si', 'sin', 'sobre', 'muy', 'cuando', 'también', 'hasta', 'hay', 'donde', 'quien', 'desde', 'todo', 'nos', 'durante', 'uno', 'ni', 'contra', 'ese', 'eso', 'mi', 'qué', 'e', 'son', 'fue', 'gracias', 'hola', 'buen', 'dia', 'punto', 'puntos'];
-
 function getWordsFromString(text) {
     if (!text || typeof text !== 'string') return [];
     return text.toLowerCase().match(/\b(\w+)\b/g)?.filter(word => !STOPWORDS.includes(word) && word.length > 2) || [];
 }
-
 function calculateSatisfaction(stats) {
     if (!stats || stats.total === 0) return 0;
     const promotores = stats.muy_positivas || 0;
@@ -44,7 +40,6 @@ function calculateSatisfaction(stats) {
     const indice = ((promotores / stats.total) - (detractores / stats.total)) * 100;
     return Math.round(indice);
 }
-
 function parseDateTime(fechaCell, horaCell) {
     try {
         if (!fechaCell || !horaCell) return null;
@@ -65,7 +60,6 @@ function parseDateTime(fechaCell, horaCell) {
         return isNaN(finalDate.getTime()) ? null : finalDate;
     } catch { return null; }
 }
-
 function analizarComentarioMasCritico(comentarios, topCriticos) {
     const fallbackMessage = "No se encontraron comentarios negativos específicos para analizar.";
     if (!comentarios || comentarios.length === 0) return fallbackMessage;
@@ -92,36 +86,32 @@ function analizarComentarioMasCritico(comentarios, topCriticos) {
     }
     return fallbackMessage;
 }
-
-// FUNCIÓN DE NUBE DE PALABRAS CORREGIDA CON 'node-wordcloud'
+// ==================================================================
+// FUNCIÓN DE NUBE REESCRITA CON LA LIBRERÍA 'wordcloud'
+// ==================================================================
 function generarNubeComoImagen(wordList, colorPalette) {
     if (!wordList || wordList.length === 0) {
         return null;
     }
-    // Creamos un canvas virtual en el servidor
     const canvas = createCanvas(800, 600);
     const maxWeight = Math.max(...wordList.map(item => item[1]));
-    
-    // Pasamos el canvas a la librería
-    const wordcloud = WordCloud(canvas);
 
     const options = {
-        list: wordList, // La lista debe estar en formato [['palabra', peso], ...]
+        list: wordList,
         gridSize: Math.round(16 * 800 / 1024),
-        weightFactor: (size) => Math.pow(size, 1.3) * (800 / 400),
+        weightFactor: (size) => Math.pow(size, 1.5) * (800 / 400),
         fontFamily: 'Impact, sans-serif',
         color: (word, weight) => weight > (maxWeight / 3) ? colorPalette.strong : colorPalette.light,
         rotateRatio: 0.5,
         rotationSteps: 2,
         backgroundColor: '#ffffff'
     };
-    
+
     try {
-        wordcloud.draw(options);
-        // Convertimos el canvas a un string base64 para enviarlo como JSON
-        const dataURL = canvas.toDataURL();
-        // Devolvemos solo la parte de los datos (sin 'data:image/png;base64,')
-        return dataURL.split(',')[1];
+        // La librería dibuja directamente sobre el canvas que le pasamos
+        WordCloud(canvas, options);
+        // Devolvemos el resultado como base64
+        return canvas.toDataURL().split(',')[1];
     } catch (e) {
         console.error("Error al generar la imagen de la nube de palabras:", e);
         return null;
@@ -132,11 +122,11 @@ function generarNubeComoImagen(wordList, colorPalette) {
 const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
 
+// RUTA PRINCIPAL (Sin cambios en su lógica interna)
 app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
     try {
         if (!req.file) return res.status(400).json({ success: false, message: 'No se subió ningún archivo.' });
 
-        // Toda tu lógica de procesamiento de Excel es excelente, no requiere cambios.
         const processedData = {
             general: { muy_positivas: 0, positivas: 0, negativas: 0, muy_negativas: 0, total: 0 },
             porDia: {},
@@ -299,7 +289,6 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
         const greenPalette = { strong: '#1a7431', light: '#28a745' };
         const redPalette = { strong: '#b32230', light: '#dc3545' };
 
-        // Las llamadas a la función ahora son síncronas porque la librería no devuelve una promesa.
         const nubePositivaB64 = generarNubeComoImagen(positiveList, greenPalette);
         const nubeNegativaB64 = generarNubeComoImagen(negativeList, redPalette);
         
@@ -317,5 +306,4 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
 });
 
 app.listen(PORT, () => console.log(`✅ Servidor corriendo en el puerto ${PORT}`));
-
  
