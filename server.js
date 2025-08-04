@@ -1,8 +1,8 @@
-// server.js - VERSIÓN FINAL Y COMPLETA CON CÁLCULO DE NPS A 1 DECIMAL
+// server.js - VERSIÓN FINAL Y COMPLETA CON MEJORAS DE ROBUSTEZ
 const express = require('express');
 const multer = require('multer');
 const ExcelJS = require('exceljs');
-const cors =require('cors');
+const cors = require('cors');
 const { createCanvas } = require('canvas');
 const d3Cloud = require('d3-cloud');
 
@@ -34,13 +34,11 @@ function getWordsFromString(text) {
     return text.toLowerCase().match(/\b(\w+)\b/g)?.filter(word => !STOPWORDS.includes(word) && word.length > 2) || [];
 }
 
-// --- CAMBIO CLAVE: Cálculo de Satisfacción con 1 decimal ---
 function calculateSatisfaction(stats) {
     if (!stats || stats.total === 0) return 0;
     const promotores = stats.muy_positivas || 0;
     const detractores = (stats.negativas || 0) + (stats.muy_negativas || 0);
     const indice = ((promotores / stats.total) - (detractores / stats.total)) * 100;
-    // Se cambia Math.round(indice) por esto para obtener un decimal:
     return parseFloat(indice.toFixed(1));
 }
 
@@ -115,7 +113,8 @@ function generarNubeComoImagen(wordList, colorPalette) {
             .words(words)
             .padding(5)
             .rotate(() => (Math.random() > 0.5) ? 0 : 90)
-            .font('DejaVu Sans')
+            // --- CAMBIO 1: Usar una fuente genérica para mayor compatibilidad ---
+            .font('sans-serif')
             .fontSize(d => d.size)
             .on('end', (words) => {
                 ctx.fillStyle = '#fff';
@@ -240,7 +239,7 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
             } catch (e) { console.warn(`Se ignoró la fila ${rowNumber} por un error de formato.`); }
         });
 
-        if (processedData.general.total === 0) return res.status(400).json({ success: false, message: 'El archivo no contiene filas con un formato válido.' });
+        if (processedData.general.total === 0) return res.status(400).json({ success: false, message: 'El archivo no contiene filas con un formato válido o está vacío.' });
         
         for (const dia of Object.keys(dailyDetails)) {
             const detallesSectoresDia = dailyDetails[dia].sectores;
@@ -256,9 +255,20 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
                 processedData.porDia[dia].sectoresDelDia = sectoresCalculados;
             }
         }
+        
+        // --- CAMBIO 2: Lógica de fechas más clara y robusta ---
+        if (processedData.fechas.length > 0) {
+            const sortedDates = processedData.fechas.sort((a, b) => {
+                const [dayA, monthA, yearA] = a.split('/');
+                const [dayB, monthB, yearB] = b.split('/');
+                return new Date(`${yearA}-${monthA}-${dayA}`) - new Date(`${yearB}-${monthB}-${dayB}`);
+            });
+            const primeraFecha = sortedDates[0];
+            const ultimaFecha = sortedDates[sortedDates.length - 1];
+            // Devolver un array con la primera y última fecha. Si es la misma, solo se incluye una vez.
+            processedData.fechas = [...new Set([primeraFecha, ultimaFecha])];
+        }
 
-        processedData.fechas.sort((a, b) => { const [dayA, monthA, yearA] = a.split('/'); const [dayB, monthB, yearB] = b.split('/'); return new Date(`${yearA}-${monthA}-${dayA}`) - new Date(`${yearB}-${monthB}-${dayB}`); });
-        processedData.fechas = processedData.fechas.map(f => f.split('/')[0]);
         const getTopItems = (obj, count = 3) => Object.entries(obj).sort(([, a], [, b]) => b - a).slice(0, count).map(([name]) => name).join(', ');
         
         for (const dia in processedData.porDia) {
