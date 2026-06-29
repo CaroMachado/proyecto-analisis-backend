@@ -10,14 +10,15 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // ============================================================================
-// AJUSTE DE DÍA DE LA SEMANA
-// Si los días aparecen corridos respecto de la fecha real (por ejemplo, muestra
-// "Jueves" cuando debería ser "Viernes"), poné este valor en 1.
-//   0  = sin ajuste (comportamiento normal)
-//   1  = adelanta un día (corrige un corrimiento de un día hacia atrás)
+// AJUSTE DE FECHA (en días)
+// Corrige el corrimiento que trae el Excel. Suma/resta días a CADA fecha leída,
+// así se acomodan juntos el nombre del día Y la fecha que se muestra.
+//   1  = adelanta un día (corrige el caso "muestra Jueves cuando es Viernes")  <-- ACTIVADO
+//   0  = sin ajuste
 //  -1  = atrasa un día
+// Si tras deployar los días salen bien pero la FECHA queda adelantada, poné 0.
 // ============================================================================
-const AJUSTE_DIAS_SEMANA = 0;
+const AJUSTE_FECHA_DIAS = 1;
 
 // --- CONFIGURACIÓN DE CORS ---
 const whitelist = ['https://devwebcm.com', 'http://localhost:5500', 'http://127.0.0.1:5500'];
@@ -96,7 +97,7 @@ function parseDateTime(fechaCell, horaCell) {
             hours = parseInt(parts[0], 10) || 0; minutes = parseInt(parts[1], 10) || 0;
         }
 
-        const finalDate = new Date(Date.UTC(baseDate.getUTCFullYear(), baseDate.getUTCMonth(), baseDate.getUTCDate(), hours, minutes));
+        const finalDate = new Date(Date.UTC(baseDate.getUTCFullYear(), baseDate.getUTCMonth(), baseDate.getUTCDate() + AJUSTE_FECHA_DIAS, hours, minutes));
         return isNaN(finalDate.getTime()) ? null : finalDate;
     } catch { return null; }
 }
@@ -225,8 +226,7 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
                 //             '| jsDate UTC:', jsDate.toISOString(),
                 //             '| dia:', DIAS_SEMANA[jsDate.getUTCDay()]);
 
-                const diaIndex = ((jsDate.getUTCDay() + AJUSTE_DIAS_SEMANA) % 7 + 7) % 7;
-                const diaSemana = DIAS_SEMANA[diaIndex];
+                const diaSemana = DIAS_SEMANA[jsDate.getUTCDay()];
                 const fechaStr = jsDate.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' });
                 const hora = jsDate.getUTCHours();
                 const sector = String(row.getCell(columnMap['sector']).value || '').trim();
