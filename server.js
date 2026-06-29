@@ -9,6 +9,16 @@ const d3Cloud = require('d3-cloud');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// ============================================================================
+// AJUSTE DE DÍA DE LA SEMANA
+// Si los días aparecen corridos respecto de la fecha real (por ejemplo, muestra
+// "Jueves" cuando debería ser "Viernes"), poné este valor en 1.
+//   0  = sin ajuste (comportamiento normal)
+//   1  = adelanta un día (corrige un corrimiento de un día hacia atrás)
+//  -1  = atrasa un día
+// ============================================================================
+const AJUSTE_DIAS_SEMANA = 0;
+
 // --- CONFIGURACIÓN DE CORS ---
 const whitelist = ['https://devwebcm.com', 'http://localhost:5500', 'http://127.0.0.1:5500'];
 const corsOptions = {
@@ -42,11 +52,38 @@ function calculateSatisfaction(stats) {
     return parseFloat(indice.toFixed(1));
 }
 
+// --- PARSEO DE FECHA/HORA ROBUSTO ---
+// Devuelve siempre una fecha en UTC con la hora aplicada. La fecha (Y/M/D) se
+// toma SIEMPRE de los componentes UTC, así el día de la semana es consistente
+// con la fecha mostrada, sin importar la zona horaria del servidor.
 function parseDateTime(fechaCell, horaCell) {
     try {
-        if (!fechaCell || !horaCell) return null;
-        let baseDate = fechaCell instanceof Date ? fechaCell : new Date(fechaCell);
-        if (isNaN(baseDate.getTime())) return null;
+        if (fechaCell === null || fechaCell === undefined || fechaCell === '') return null;
+
+        let baseDate = null;
+
+        if (fechaCell instanceof Date) {
+            baseDate = fechaCell;
+        } else if (typeof fechaCell === 'number') {
+            // Número serial de Excel -> medianoche UTC (epoch 1899-12-30)
+            baseDate = new Date(Math.round((fechaCell - 25569) * 86400 * 1000));
+        } else if (typeof fechaCell === 'string') {
+            const s = fechaCell.trim();
+            let m;
+            if ((m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/))) {
+                // dd/mm/yyyy o dd-mm-yyyy
+                baseDate = new Date(Date.UTC(+m[3], +m[2] - 1, +m[1]));
+            } else if ((m = s.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/))) {
+                // yyyy-mm-dd (ISO)
+                baseDate = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+            } else {
+                const d = new Date(s);
+                if (!isNaN(d.getTime())) baseDate = d;
+            }
+        }
+
+        if (!baseDate || isNaN(baseDate.getTime())) return null;
+
         let hours = 0, minutes = 0;
         if (horaCell instanceof Date) {
             hours = horaCell.getUTCHours(); minutes = horaCell.getUTCMinutes();
@@ -54,10 +91,11 @@ function parseDateTime(fechaCell, horaCell) {
             const totalSecondsInDay = horaCell * 86400;
             hours = Math.floor(totalSecondsInDay / 3600) % 24;
             minutes = Math.floor((totalSecondsInDay % 3600) / 60);
-        } else if (typeof horaCell === 'string') {
+        } else if (typeof horaCell === 'string' && horaCell.trim()) {
             const parts = horaCell.split(':');
             hours = parseInt(parts[0], 10) || 0; minutes = parseInt(parts[1], 10) || 0;
-        } else { return null; }
+        }
+
         const finalDate = new Date(Date.UTC(baseDate.getUTCFullYear(), baseDate.getUTCMonth(), baseDate.getUTCDate(), hours, minutes));
         return isNaN(finalDate.getTime()) ? null : finalDate;
     } catch { return null; }
@@ -94,13 +132,13 @@ function generarNubeComoImagen(wordList, colorPalette) {
     if (!wordList || wordList.length === 0) {
         return Promise.resolve(null);
     }
-    
+
     return new Promise(resolve => {
         const canvas = createCanvas(800, 600);
         const ctx = canvas.getContext('2d');
         const maxWeight = Math.max(...wordList.map(item => item[1]));
         const minWeight = Math.min(...wordList.map(item => item[1]));
-        
+
         const words = wordList.map(item => ({
             text: item[0],
             size: 10 + 90 * ((item[1] - minWeight) / (maxWeight - minWeight || 1)),
@@ -119,7 +157,7 @@ function generarNubeComoImagen(wordList, colorPalette) {
             .on('end', (words) => {
                 ctx.fillStyle = '#fff';
                 ctx.fillRect(0, 0, 800, 600);
-                
+
                 ctx.save();
                 ctx.translate(400, 300);
                 words.forEach(word => {
@@ -134,7 +172,7 @@ function generarNubeComoImagen(wordList, colorPalette) {
                     ctx.restore();
                 });
                 ctx.restore();
-                
+
                 resolve(canvas.toDataURL().split(',')[1]);
             });
 
@@ -149,7 +187,7 @@ const upload = multer({ storage: storage });
 app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
     try {
         if (!req.file) return res.status(400).json({ success: false, message: 'No se subió ningún archivo.' });
-        
+
         const processedData = {
             general: { muy_positivas: 0, positivas: 0, negativas: 0, muy_negativas: 0, total: 0 },
             porDia: {},
@@ -160,27 +198,35 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
         };
         const dailyDetails = {};
         const DIAS_SEMANA = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
-        
+
         const workbook = new ExcelJS.Workbook();
         await workbook.xlsx.load(req.file.buffer);
         const worksheet = workbook.worksheets[0];
-        
+
         let columnMap = {};
         worksheet.getRow(1).eachCell((cell, colNumber) => {
             if (cell.value) columnMap[cell.value.toString().toLowerCase().trim().replace(/ /g, '_')] = colNumber;
         });
-        
+
         const requiredColumns = ['fecha', 'hora', 'sector', 'ubicacion', 'calificacion_descripcion'];
         for (const col of requiredColumns) {
             if (!columnMap[col]) return res.status(400).json({ success: false, message: `El archivo Excel no contiene la columna requerida: "${col}"` });
         }
-        
+
         worksheet.eachRow((row, rowNumber) => {
             if (rowNumber === 1) return;
             try {
                 const jsDate = parseDateTime(row.getCell(columnMap['fecha']).value, row.getCell(columnMap['hora']).value);
                 if (!jsDate) return;
-                const diaSemana = DIAS_SEMANA[jsDate.getUTCDay()];
+
+                // --- DIAGNÓSTICO (descomentar para ver en los logs de Render cómo llega la fecha) ---
+                // console.log('CRUDO fecha:', JSON.stringify(row.getCell(columnMap['fecha']).value),
+                //             '| tipo:', typeof row.getCell(columnMap['fecha']).value,
+                //             '| jsDate UTC:', jsDate.toISOString(),
+                //             '| dia:', DIAS_SEMANA[jsDate.getUTCDay()]);
+
+                const diaIndex = ((jsDate.getUTCDay() + AJUSTE_DIAS_SEMANA) % 7 + 7) % 7;
+                const diaSemana = DIAS_SEMANA[diaIndex];
                 const fechaStr = jsDate.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' });
                 const hora = jsDate.getUTCHours();
                 const sector = String(row.getCell(columnMap['sector']).value || '').trim();
@@ -240,7 +286,7 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
         });
 
         if (processedData.general.total === 0) return res.status(400).json({ success: false, message: 'El archivo no contiene filas con un formato válido o está vacío.' });
-        
+
         for (const dia of Object.keys(dailyDetails)) {
             const detallesSectoresDia = dailyDetails[dia].sectores;
             const sectoresCalculados = [];
@@ -255,7 +301,7 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
                 processedData.porDia[dia].sectoresDelDia = sectoresCalculados;
             }
         }
-        
+
         // --- CAMBIO 2: Lógica de fechas más clara y robusta ---
         if (processedData.fechas.length > 0) {
             const sortedDates = processedData.fechas.sort((a, b) => {
@@ -270,7 +316,7 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
         }
 
         const getTopItems = (obj, count = 3) => Object.entries(obj).sort(([, a], [, b]) => b - a).slice(0, count).map(([name]) => name).join(', ');
-        
+
         for (const dia in processedData.porDia) {
             let sectorMasCritico = { nombre: 'N/A', satisfaccion: 101, criticos: 'N/A', total: 0, comentarios: [] };
             if (processedData.porDia[dia].sectoresDelDia) {
@@ -290,22 +336,22 @@ app.post('/procesar', upload.single('archivoExcel'), async (req, res) => {
         for (const dia in processedData.porDia) { processedData.porDia[dia].satisfaccion = calculateSatisfaction(processedData.porDia[dia]); }
         processedData.porHora.forEach(hora => { hora.satisfaccion = calculateSatisfaction(hora); });
         for (const sector in processedData.porSector) { processedData.porSector[sector].satisfaccion = calculateSatisfaction(processedData.porSector[sector]); }
-        
+
         const countWords = (arr) => arr.reduce((acc, w) => { acc[w] = (acc[w] || 0) + 1; return acc; }, {});
         let positiveList = Object.entries(countWords(processedData.nubes.positiva)).sort((a, b) => b[1] - a[1]).slice(0, 50);
         let negativeList = Object.entries(countWords(processedData.nubes.negativa)).sort((a, b) => b[1] - a[1]).slice(0, 50);
-        
+
         const greenPalette = { strong: '#43a047', light: '#7cb342' };
         const redPalette = { strong: '#d32f2f', light: '#fb8c00' };
 
         const nubePositivaB64 = await generarNubeComoImagen(positiveList, greenPalette);
         const nubeNegativaB64 = await generarNubeComoImagen(negativeList, redPalette);
-        
+
         processedData.nubes = {
             positiva_b64: nubePositivaB64,
             negativa_b64: nubeNegativaB64
         };
-        
+
         res.json({ success: true, data: processedData });
 
     } catch (error) {
